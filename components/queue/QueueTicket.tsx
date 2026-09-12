@@ -26,12 +26,13 @@ export function QueueTicket({
     <title>Queue Ticket</title>
     <style>
       @page {
-        size: 57mm auto;
+        size: 57mm 52mm;
         margin: 0;
       }
 
       html,
       body {
+        width: 57mm;
         margin: 0;
         padding: 0;
         background: #ffffff;
@@ -41,19 +42,43 @@ export function QueueTicket({
 
       .ticket {
         box-sizing: border-box;
-        width: 100%;
+        width: 57mm;
         max-width: 57mm;
-        padding: 10mm 0;
+        padding: 4mm 2mm;
         text-align: center;
         break-inside: avoid;
         page-break-inside: avoid;
+        page-break-after: avoid;
+      }
+
+      .ticket-logo {
+        display: block;
+        width: 14mm;
+        height: auto;
+        max-height: 14mm;
+        margin: 0 auto 1.5mm;
+        object-fit: contain;
+      }
+
+      .ticket-practice {
+        margin: 0 0 3mm;
+        font-size: 9pt;
+        font-weight: 700;
+        line-height: 1.15;
+      }
+
+      .ticket-label {
+        margin: 0 0 1.5mm;
+        font-size: 8pt;
+        font-weight: 700;
+        line-height: 1.2;
       }
 
       .ticket-number {
         color: #000000;
-        font-size: 52px;
-        font-weight: 800;
-        line-height: 1;
+        font-size: 34pt;
+        font-weight: 900;
+        line-height: 0.95;
         letter-spacing: 0;
         white-space: nowrap;
       }
@@ -61,6 +86,9 @@ export function QueueTicket({
   </head>
   <body>
     <main class="ticket">
+      <img class="ticket-logo" src="/images/nmc-logo.png" alt="Newcastle Medical Centre logo" />
+      <div class="ticket-practice">Newcastle Medical Centre</div>
+      <div class="ticket-label">Queue Number</div>
       <div class="ticket-number" id="ticket-number"></div>
     </main>
   </body>
@@ -97,6 +125,9 @@ export function QueueTicket({
       </div>
 
       <div className="queue-ticket" aria-label={`Queue ticket ${code}`}>
+        <img className="queue-ticket-logo" src="/images/nmc-logo.png" alt="Newcastle Medical Centre logo" />
+        <div className="queue-ticket-practice">Newcastle Medical Centre</div>
+        <div className="queue-ticket-label">Queue Number</div>
         <div className="queue-ticket-number">{code}</div>
       </div>
     </section>
