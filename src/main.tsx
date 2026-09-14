@@ -16,6 +16,7 @@ import {
   isClearedQueueItem,
   QueueCategory,
   QueueItem,
+  queueProceedInstruction,
   QueueStatus,
   updateQueueStatus,
   useQueueStore,
@@ -661,7 +662,7 @@ function DisplayPage() {
             {nowServing ? (
               <>
                 <strong>{formatQueueCode(nowServing)}</strong>
-                <p>Please proceed to Nurse Station</p>
+                <p>{queueProceedInstruction(formatQueueCode(nowServing))}</p>
               </>
             ) : (
               <div className="display-empty">

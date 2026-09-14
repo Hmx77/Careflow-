@@ -11,6 +11,9 @@ import {
   nextQueueCodeForSession,
   numericQueueCode,
   parseQueueCode,
+  queueLocationForCategory,
+  queueLocationForCode,
+  queueProceedInstruction,
   storageQueueCode,
 } from "./queueCodes";
 import type { QueueCategory, QueueCodeStatus } from "./queueCodes";
@@ -18,7 +21,7 @@ import type { QueueCategory, QueueCodeStatus } from "./queueCodes";
 export type QueueStatus = QueueCodeStatus;
 export type QueuePriority = "normal" | "urgent" | "follow_up";
 export type { QueueCategory } from "./queueCodes";
-export { formatQueueCode, storageQueueCode } from "./queueCodes";
+export { formatQueueCode, queueProceedInstruction, storageQueueCode } from "./queueCodes";
 
 export type QueueItem = {
   id: string;
@@ -90,7 +93,7 @@ export async function createQueueItem(input: {
           code,
           status: "waiting",
           priority: input.priority ?? "normal",
-          room_location: "Nurse Station",
+          room_location: queueLocationForCategory(input.category),
           internal_reference: input.optionalInternalReference?.trim() || null,
           phone_number: input.optionalPhoneNumber?.trim() || null,
         })
@@ -148,7 +151,7 @@ export async function updateQueueStatus(id: string, status: QueueStatus) {
   try {
     const patch: Partial<QueueRow> = { status };
     const current = snapshot.items.find((item) => item.id === id);
-    if (status === "called") patch.room_location = "Nurse Station";
+    if (status === "called" && current) patch.room_location = queueLocationForCode(current.code);
     if (status === "completed" && current) {
       patch.code = archiveQueueCode(current.id, current.code);
       patch.room_location = `${completedQueueMarkerPrefix}${formatQueueCode(current)}`;
@@ -177,7 +180,7 @@ export async function callQueueItem(id: string) {
             .from("queue")
             .update(
               item.id === id
-                ? { status: "called", room_location: "Nurse Station" }
+                ? { status: "called", room_location: queueLocationForCode(item.code) }
                 : { status: "in_progress" },
             )
             .eq("id", item.id),

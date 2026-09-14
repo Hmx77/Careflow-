@@ -28,6 +28,19 @@ export function nextQueueCodeForSession(rows: QueueCodeRecord[], category: Queue
   return `${prefix}-${String(highest + 1).padStart(3, "0")}`;
 }
 
+export function queueLocationForCategory(category: QueueCategory) {
+  return category === "dental" ? "Dental Clinic" : "Nurse Station";
+}
+
+export function queueLocationForCode(code: string) {
+  const parsed = parseQueueCode(formatQueueCode(code));
+  return parsed?.prefix === "D" ? "Dental Clinic" : "Nurse Station";
+}
+
+export function queueProceedInstruction(code: string) {
+  return `Please proceed to ${queueLocationForCode(code)}`;
+}
+
 export function isClearedQueueRecord(row: QueueCodeRecord) {
   const roomLocation = getRoomLocation(row);
   return row.status === "completed" && (roomLocation === clearedQueueMarker || roomLocation.startsWith(clearedQueueMarkerPrefix));
