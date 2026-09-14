@@ -689,7 +689,7 @@ async function announceTicket(
   item: QueueItem,
   speechSupported: boolean,
 ): Promise<"ok" | "blocked"> {
-  const message = `Ticket ${formatQueueCode(item)}, please proceed to Nurse Station.`;
+  const message = `Now serving ticket number ${spokenQueueCode(formatQueueCode(item))}.`;
 
   try {
     const chime = new Audio("/sounds/chime.mp3");
@@ -722,6 +722,27 @@ async function announceTicket(
   }
 
   return "ok";
+}
+
+function spokenQueueCode(code: string) {
+  const words: Record<string, string> = {
+    "0": "zero",
+    "1": "one",
+    "2": "two",
+    "3": "three",
+    "4": "four",
+    "5": "five",
+    "6": "six",
+    "7": "seven",
+    "8": "eight",
+    "9": "nine",
+  };
+
+  return code
+    .replace(/-/g, "")
+    .split("")
+    .map((character) => words[character] ?? character)
+    .join(" ");
 }
 
 function isAutoplayBlocked(error: unknown) {
