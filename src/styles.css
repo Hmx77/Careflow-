@@ -385,6 +385,7 @@ a {
 
 .join-form input,
 .staff-panel input,
+.staff-panel select,
 .admin-panel textarea,
 .queue-row select {
   background: #ffffff;

@@ -3,7 +3,8 @@
 CareFlow now requires Supabase for shared queue state across reception, patient phones, and the waiting room display. There is no fake queue fallback.
 
 1. Create a Supabase project.
-2. Open the Supabase SQL editor and run `supabase/schema.sql`.
+2. For a new database, open the Supabase SQL editor and run `supabase/schema.sql`.
+   For an existing CareFlow database, run `supabase/migrations/20260914_dental_general_queue_codes.sql` once before deploying the updated app.
 3. In Supabase Project Settings > API, copy:
    - Project URL
    - anon public key

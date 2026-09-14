@@ -14,6 +14,7 @@ import {
   getNowServing,
   getWaitingQueue,
   isClearedQueueItem,
+  QueueCategory,
   QueueItem,
   QueueStatus,
   updateQueueStatus,
@@ -109,7 +110,7 @@ function JoinPage() {
         <p>Use this page only if you need to type the code from your ticket.</p>
         <form onSubmit={submit} className="join-form">
           <label htmlFor="queue-code">Queue code</label>
-          <input id="queue-code" value={code} onChange={(event) => setCode(event.target.value)} placeholder="001" autoComplete="off" />
+          <input id="queue-code" value={code} onChange={(event) => setCode(event.target.value)} placeholder="D001 or G001" autoComplete="off" />
           <button className="button button-primary button-full" type="submit">
             <Search size={22} />
             View my queue status
@@ -182,6 +183,7 @@ function ReceptionPage() {
   const { items } = queue;
   const activeQueue = getActiveQueue(items);
   const waitingQueue = getWaitingQueue(items);
+  const [category, setCategory] = React.useState<QueueCategory | "">("");
   const [optionalInternalReference, setOptionalInternalReference] = React.useState("");
   const [optionalPhoneNumber, setOptionalPhoneNumber] = React.useState("");
   const [created, setCreated] = React.useState<QueueItem | null>(null);
@@ -202,11 +204,16 @@ function ReceptionPage() {
   async function submit(event: React.FormEvent) {
     event.preventDefault();
     setActionError("");
+    if (!category) {
+      setActionError("Select Dental or General before creating a queue number.");
+      return;
+    }
     try {
-      const item = await createQueueItem({ optionalInternalReference, optionalPhoneNumber });
+      const item = await createQueueItem({ category, optionalInternalReference, optionalPhoneNumber });
       setCreated(item);
       setQrVisible(false);
       setCopyState("Copy patient link");
+      setCategory("");
       setOptionalInternalReference("");
       setOptionalPhoneNumber("");
     } catch (error) {
@@ -288,7 +295,15 @@ function ReceptionPage() {
       <section className="dashboard-grid">
         <form className="staff-panel" onSubmit={submit}>
           <h1>Create Queue Number</h1>
-          <button className="button button-primary button-full" type="submit">
+          <label>
+            Category <span>required</span>
+            <select value={category} onChange={(event) => setCategory(event.target.value as QueueCategory | "")} required>
+              <option value="">Select category</option>
+              <option value="dental">Dental</option>
+              <option value="general">General</option>
+            </select>
+          </label>
+          <button className="button button-primary button-full" type="submit" disabled={!category}>
             <Ticket size={22} />
             Create Queue Number
           </button>

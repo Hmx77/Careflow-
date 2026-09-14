@@ -2,7 +2,7 @@ create extension if not exists pgcrypto;
 
 create table if not exists public.queue (
   id uuid primary key default gen_random_uuid(),
-  code text not null unique check (code ~ '^NC-[0-9]+$'),
+  code text not null unique check (code ~ '^(NC|D|G)-[0-9]+$'),
   created_at timestamptz not null default now(),
   status text not null default 'waiting' check (status in ('waiting', 'called', 'in_progress', 'completed', 'delayed')),
   priority text not null default 'normal' check (priority in ('normal', 'urgent', 'follow_up')),

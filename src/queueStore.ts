@@ -3,6 +3,8 @@ import { useEffect, useSyncExternalStore } from "react";
 
 export type QueueStatus = "waiting" | "called" | "in_progress" | "completed" | "delayed";
 export type QueuePriority = "normal" | "urgent" | "follow_up";
+export type QueueCategory = "dental" | "general";
+type QueuePrefix = "D" | "G";
 
 export type QueueItem = {
   id: string;
@@ -63,13 +65,14 @@ export function useQueueStore() {
 }
 
 export async function createQueueItem(input: {
+  category: QueueCategory;
   priority?: QueuePriority;
   optionalInternalReference?: string;
   optionalPhoneNumber?: string;
 }) {
   try {
     const client = requireSupabase();
-    const code = await nextQueueCode();
+    const code = await nextQueueCode(input.category);
     await archiveCompletedCodeCollision(code);
     const { data, error } = await withTimeout(
       client
@@ -118,7 +121,7 @@ async function archiveCompletedCodeCollision(code: string) {
         client
           .from("queue")
           .update({
-            code: archiveQueueCode(row.id),
+            code: archiveQueueCode(row.id, row.code),
             room_location: row.room_location?.startsWith(clearedQueueMarkerPrefix)
               ? row.room_location
               : `${completedQueueMarkerPrefix}${formatQueueCode(row)}`,
@@ -138,7 +141,7 @@ export async function updateQueueStatus(id: string, status: QueueStatus) {
     const current = snapshot.items.find((item) => item.id === id);
     if (status === "called") patch.room_location = "Nurse Station";
     if (status === "completed" && current) {
-      patch.code = archiveQueueCode(current.id);
+      patch.code = archiveQueueCode(current.id, current.code);
       patch.room_location = `${completedQueueMarkerPrefix}${formatQueueCode(current)}`;
     }
 
@@ -208,7 +211,7 @@ export async function clearAllQueueItems() {
           client
             .from("queue")
             .update({
-              code: `NC-${archiveSeed}${String(index).padStart(3, "0")}`,
+              code: archiveQueueCode(`${row.id}${archiveSeed}${index}`, row.code),
               status: "completed",
               room_location: `${clearedQueueMarkerPrefix}${formatQueueCode(row)}`,
               internal_reference: `${clearedQueueReferencePrefix}${formatQueueCode(row)}`,
@@ -284,16 +287,27 @@ export function formatQueueCode(itemOrCode: QueueItem | QueueRow | string) {
   }
 
   const code = typeof itemOrCode === "string" ? itemOrCode : itemOrCode.code;
-  const value = numericQueueCode(code);
-  return String(value || 1).padStart(3, "0");
+  const parsed = parseQueueCode(code);
+  if (parsed?.prefix === "D" || parsed?.prefix === "G") {
+    return `${parsed.prefix}${String(parsed.number || 1).padStart(3, "0")}`;
+  }
+
+  return String(parsed?.number || 1).padStart(3, "0");
 }
 
 export function storageQueueCode(input: string) {
-  const value = numericQueueCode(input);
-  return `NC-${String(value || 1).padStart(3, "0")}`;
+  const parsed = parseQueueCode(input);
+  const value = parsed?.number || 1;
+  if (parsed?.prefix === "D" || parsed?.prefix === "G") {
+    return `${parsed.prefix}-${String(value).padStart(3, "0")}`;
+  }
+  return `NC-${String(value).padStart(3, "0")}`;
 }
 
 export function findQueueItemByCode(items: QueueItem[], input: string) {
+  const parsed = parseQueueCode(input);
+  if (!parsed) return undefined;
+
   const normalized = storageQueueCode(input);
   const publicCode = formatQueueCode(normalized);
   return items.find((item) => item.code === normalized) ||
@@ -354,7 +368,8 @@ async function fetchQueue(options: { showLoading?: boolean } = {}) {
   }
 }
 
-async function nextQueueCode() {
+async function nextQueueCode(category: QueueCategory) {
+  const prefix = queuePrefixForCategory(category);
   const { data, error } = await withTimeout(
     requireSupabase()
       .from("queue")
@@ -369,11 +384,11 @@ async function nextQueueCode() {
   }
 
   const highest = sortQueue((data || []).map(fromRow)).reduce((max, row) => {
-    const value = numericQueueCode(row.code);
-    return Number.isFinite(value) ? Math.max(max, value) : max;
+    const parsed = parseQueueCode(row.code);
+    return parsed?.prefix === prefix && Number.isFinite(parsed.number) ? Math.max(max, parsed.number) : max;
   }, 0);
 
-  return `NC-${String(highest + 1).padStart(3, "0")}`;
+  return `${prefix}-${String(highest + 1).padStart(3, "0")}`;
 }
 
 function fromRow(row: QueueRow): QueueItem {
@@ -416,9 +431,7 @@ function sortQueue(items: QueueItem[]) {
 }
 
 function numericQueueCode(code: string) {
-  const match = code.trim().toUpperCase().match(/(?:NC-)?(\d+)$/);
-  const value = Number(match?.[1]);
-  return Number.isFinite(value) ? value : 0;
+  return parseQueueCode(code)?.number || 0;
 }
 
 function shouldArchiveRow(row: QueueRow) {
@@ -426,9 +439,32 @@ function shouldArchiveRow(row: QueueRow) {
   return numericQueueCode(row.code) > 0;
 }
 
-function archiveQueueCode(id: string) {
-  const idNumber = Number.parseInt(id.replace(/\D/g, "").slice(0, 6), 10) || Math.floor(Math.random() * 999999);
-  return `NC-${Date.now()}${String(idNumber).padStart(6, "0")}`;
+function archiveQueueCode(id: string, originalCode: string) {
+  const prefix = queuePrefixFromCode(originalCode);
+  const idDigits = id.replace(/\D/g, "");
+  const rowSeed = `${idDigits.slice(0, 6)}${idDigits.slice(-6)}` || String(Math.floor(Math.random() * 999999)).padStart(6, "0");
+  return `${prefix}-${Date.now()}${rowSeed}`;
+}
+
+function queuePrefixForCategory(category: QueueCategory): QueuePrefix {
+  return category === "dental" ? "D" : "G";
+}
+
+function queuePrefixFromCode(code: string): QueuePrefix {
+  const parsed = parseQueueCode(code);
+  return parsed?.prefix === "D" ? "D" : "G";
+}
+
+function parseQueueCode(code: string): { prefix: QueuePrefix | "NC"; number: number } | null {
+  const clean = code.trim().toUpperCase().replace(/\s+/g, "");
+  const prefixed = clean.match(/^(D|G|NC)-?(\d+)$/);
+  const numericOnly = clean.match(/^(\d+)$/);
+  const prefix = prefixed?.[1] as QueuePrefix | "NC" | undefined;
+  const rawNumber = prefixed?.[2] ?? numericOnly?.[1];
+  const value = Number(rawNumber);
+
+  if (!Number.isFinite(value) || value <= 0) return null;
+  return { prefix: prefix ?? "NC", number: value };
 }
 
 function withTimeout<T>(promise: PromiseLike<T>, message: string, timeoutMs = 10000): Promise<T> {
