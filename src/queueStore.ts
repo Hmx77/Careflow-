@@ -1,10 +1,24 @@
 import { createClient, SupabaseClient } from "@supabase/supabase-js";
 import { useEffect, useSyncExternalStore } from "react";
+import {
+  archiveQueueCode,
+  clearedQueueMarker,
+  clearedQueueMarkerPrefix,
+  clearedQueueReferencePrefix,
+  completedQueueMarkerPrefix,
+  formatQueueCode,
+  isClearedQueueRecord,
+  nextQueueCodeForSession,
+  numericQueueCode,
+  parseQueueCode,
+  storageQueueCode,
+} from "./queueCodes";
+import type { QueueCategory, QueueCodeStatus } from "./queueCodes";
 
-export type QueueStatus = "waiting" | "called" | "in_progress" | "completed" | "delayed";
+export type QueueStatus = QueueCodeStatus;
 export type QueuePriority = "normal" | "urgent" | "follow_up";
-export type QueueCategory = "dental" | "general";
-type QueuePrefix = "D" | "G";
+export type { QueueCategory } from "./queueCodes";
+export { formatQueueCode, storageQueueCode } from "./queueCodes";
 
 export type QueueItem = {
   id: string;
@@ -39,11 +53,6 @@ const supabaseUrl = cleanEnvValue(import.meta.env.VITE_SUPABASE_URL as string | 
 const supabaseAnonKey = cleanEnvValue(import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined);
 const configError = getConfigError();
 const isConfigured = !configError;
-
-const clearedQueueMarker = "__careflow_cleared__";
-const clearedQueueMarkerPrefix = "__careflow_cleared__:";
-const completedQueueMarkerPrefix = "__careflow_completed__:";
-const clearedQueueReferencePrefix = "__careflow_cleared_public_code__:";
 
 const listeners = new Set<() => void>();
 let didStart = false;
@@ -267,41 +276,7 @@ export function getEstimatedWait(items: QueueItem[], code: string) {
 }
 
 export function isClearedQueueItem(item: QueueItem) {
-  return item.status === "completed" && (item.roomLocation === clearedQueueMarker || item.roomLocation.startsWith(clearedQueueMarkerPrefix));
-}
-
-export function formatQueueCode(itemOrCode: QueueItem | QueueRow | string) {
-  if (typeof itemOrCode !== "string") {
-    const isQueueItem = "roomLocation" in itemOrCode;
-    const roomLocation = isQueueItem ? itemOrCode.roomLocation : itemOrCode.room_location;
-    const internalReference = isQueueItem ? itemOrCode.optionalInternalReference : itemOrCode.internal_reference;
-    if (roomLocation?.startsWith(clearedQueueMarkerPrefix)) {
-      return roomLocation.replace(clearedQueueMarkerPrefix, "");
-    }
-    if (roomLocation?.startsWith(completedQueueMarkerPrefix)) {
-      return roomLocation.replace(completedQueueMarkerPrefix, "");
-    }
-    if (roomLocation === clearedQueueMarker && internalReference?.startsWith(clearedQueueReferencePrefix)) {
-      return internalReference.replace(clearedQueueReferencePrefix, "");
-    }
-  }
-
-  const code = typeof itemOrCode === "string" ? itemOrCode : itemOrCode.code;
-  const parsed = parseQueueCode(code);
-  if (parsed?.prefix === "D" || parsed?.prefix === "G") {
-    return `${parsed.prefix}${String(parsed.number || 1).padStart(3, "0")}`;
-  }
-
-  return String(parsed?.number || 1).padStart(3, "0");
-}
-
-export function storageQueueCode(input: string) {
-  const parsed = parseQueueCode(input);
-  const value = parsed?.number || 1;
-  if (parsed?.prefix === "D" || parsed?.prefix === "G") {
-    return `${parsed.prefix}-${String(value).padStart(3, "0")}`;
-  }
-  return `NC-${String(value).padStart(3, "0")}`;
+  return isClearedQueueRecord(item);
 }
 
 export function findQueueItemByCode(items: QueueItem[], input: string) {
@@ -369,12 +344,10 @@ async function fetchQueue(options: { showLoading?: boolean } = {}) {
 }
 
 async function nextQueueCode(category: QueueCategory) {
-  const prefix = queuePrefixForCategory(category);
   const { data, error } = await withTimeout(
     requireSupabase()
       .from("queue")
       .select("id, code, created_at, status, priority, room_location, internal_reference, phone_number")
-      .neq("status", "completed")
       .order("created_at", { ascending: true }),
     "Generating queue code timed out.",
   );
@@ -383,12 +356,7 @@ async function nextQueueCode(category: QueueCategory) {
     throw error;
   }
 
-  const highest = sortQueue((data || []).map(fromRow)).reduce((max, row) => {
-    const parsed = parseQueueCode(row.code);
-    return parsed?.prefix === prefix && Number.isFinite(parsed.number) ? Math.max(max, parsed.number) : max;
-  }, 0);
-
-  return `${prefix}-${String(highest + 1).padStart(3, "0")}`;
+  return nextQueueCodeForSession(data || [], category);
 }
 
 function fromRow(row: QueueRow): QueueItem {
@@ -430,41 +398,9 @@ function sortQueue(items: QueueItem[]) {
   return [...items].sort((a, b) => a.createdAt - b.createdAt);
 }
 
-function numericQueueCode(code: string) {
-  return parseQueueCode(code)?.number || 0;
-}
-
 function shouldArchiveRow(row: QueueRow) {
   if (row.room_location === clearedQueueMarker || row.room_location?.startsWith(clearedQueueMarkerPrefix)) return false;
   return numericQueueCode(row.code) > 0;
-}
-
-function archiveQueueCode(id: string, originalCode: string) {
-  const prefix = queuePrefixFromCode(originalCode);
-  const idDigits = id.replace(/\D/g, "");
-  const rowSeed = `${idDigits.slice(0, 6)}${idDigits.slice(-6)}` || String(Math.floor(Math.random() * 999999)).padStart(6, "0");
-  return `${prefix}-${Date.now()}${rowSeed}`;
-}
-
-function queuePrefixForCategory(category: QueueCategory): QueuePrefix {
-  return category === "dental" ? "D" : "G";
-}
-
-function queuePrefixFromCode(code: string): QueuePrefix {
-  const parsed = parseQueueCode(code);
-  return parsed?.prefix === "D" ? "D" : "G";
-}
-
-function parseQueueCode(code: string): { prefix: QueuePrefix | "NC"; number: number } | null {
-  const clean = code.trim().toUpperCase().replace(/\s+/g, "");
-  const prefixed = clean.match(/^(D|G|NC)-?(\d+)$/);
-  const numericOnly = clean.match(/^(\d+)$/);
-  const prefix = prefixed?.[1] as QueuePrefix | "NC" | undefined;
-  const rawNumber = prefixed?.[2] ?? numericOnly?.[1];
-  const value = Number(rawNumber);
-
-  if (!Number.isFinite(value) || value <= 0) return null;
-  return { prefix: prefix ?? "NC", number: value };
 }
 
 function withTimeout<T>(promise: PromiseLike<T>, message: string, timeoutMs = 10000): Promise<T> {

@@ -1,8 +1,24 @@
 import { chromium } from "playwright-core";
+import { readFile } from "node:fs/promises";
+import ts from "typescript";
 
 const chromePath = "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe";
 const baseUrl = process.env.CAREFLOW_BASE_URL || "http://127.0.0.1:5173";
 const forbidden = ["doctor", "treatment", "insurance", "notes", "department", "patient name"];
+const queueCodesSource = await readFile(new URL("../src/queueCodes.ts", import.meta.url), "utf8");
+const queueCodesJs = ts.transpileModule(queueCodesSource, {
+  compilerOptions: {
+    module: ts.ModuleKind.ES2022,
+    target: ts.ScriptTarget.ES2022,
+  },
+}).outputText;
+const queueCodesModule = await import(`data:text/javascript;base64,${Buffer.from(queueCodesJs).toString("base64")}`);
+const {
+  clearedQueueMarkerPrefix,
+  completedQueueMarkerPrefix,
+  formatQueueCode,
+  nextQueueCodeForSession,
+} = queueCodesModule;
 
 const browser = await chromium.launch({
   executablePath: chromePath,
@@ -12,6 +28,24 @@ const browser = await chromium.launch({
 const context = await browser.newContext({ viewport: { width: 1280, height: 720 } });
 const receptionPage = await context.newPage();
 const results = {};
+const queueNumberingRows = [];
+
+results.queueDentalStartsAtD001 = nextQueueCodeForSession(queueNumberingRows, "dental") === "D-001";
+queueNumberingRows.push({ code: "D-001", status: "completed", room_location: `${completedQueueMarkerPrefix}D001` });
+results.queueDentalCompletionDoesNotReuseD001 = nextQueueCodeForSession(queueNumberingRows, "dental") === "D-002";
+queueNumberingRows.push({ code: "D-002", status: "waiting", room_location: "Nurse Station" });
+results.queueGeneralStartsAtG001 = nextQueueCodeForSession(queueNumberingRows, "general") === "G-001";
+queueNumberingRows.push({ code: "G-001", status: "completed", room_location: `${completedQueueMarkerPrefix}G001` });
+results.queueGeneralCompletionDoesNotReuseG001 = nextQueueCodeForSession(queueNumberingRows, "general") === "G-002";
+queueNumberingRows.push({ code: "G-002", status: "waiting", room_location: "Nurse Station" });
+
+const clearedRows = queueNumberingRows.map((row) => ({
+  ...row,
+  status: "completed",
+  room_location: `${clearedQueueMarkerPrefix}${formatQueueCode(row)}`,
+}));
+results.queueDentalRestartsAfterClear = nextQueueCodeForSession(clearedRows, "dental") === "D-001";
+results.queueGeneralRestartsAfterClear = nextQueueCodeForSession(clearedRows, "general") === "G-001";
 
 async function bodyText(page) {
   return page.locator("body").innerText();
