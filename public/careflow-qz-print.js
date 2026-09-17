@@ -19,29 +19,46 @@
   function configureSecurity(qz) {
     if (securityConfigured) return;
 
-    qz.security.setCertificatePromise(async (resolve, reject) => {
-      try {
-        const response = await fetch("/api/qz-certificate", { cache: "no-store" });
-        if (!response.ok) throw new Error(await response.text());
-        resolve(await response.text());
-      } catch (error) {
-        reject(error);
-      }
-    });
+    // QZ Tray supports resolver-style promises. Keep these handlers as normal
+    // functions (not async functions) so QZ receives the certificate/signature
+    // through resolve(), matching the official signing examples.
+    qz.security.setCertificatePromise(function(resolve, reject) {
+      fetch("/api/qz-certificate", {
+        cache: "no-store",
+        headers: { "Content-Type": "text/plain" },
+      })
+        .then(function(response) {
+          if (!response.ok) {
+            return response.text().then(function(message) {
+              throw new Error(message || "Could not load QZ certificate.");
+            });
+          }
+          return response.text();
+        })
+        .then(resolve)
+        .catch(reject);
+    }, { rejectOnFailure: true });
 
     qz.security.setSignatureAlgorithm("SHA512");
-    qz.security.setSignaturePromise((toSign) => async (resolve, reject) => {
-      try {
-        const response = await fetch("/api/qz-sign", {
+    qz.security.setSignaturePromise(function(toSign) {
+      return function(resolve, reject) {
+        fetch("/api/qz-sign", {
           method: "POST",
+          cache: "no-store",
           headers: { "Content-Type": "text/plain; charset=utf-8" },
           body: toSign,
-        });
-        if (!response.ok) throw new Error(await response.text());
-        resolve(await response.text());
-      } catch (error) {
-        reject(error);
-      }
+        })
+          .then(function(response) {
+            if (!response.ok) {
+              return response.text().then(function(message) {
+                throw new Error(message || "Could not sign QZ request.");
+              });
+            }
+            return response.text();
+          })
+          .then(resolve)
+          .catch(reject);
+      };
     });
 
     securityConfigured = true;
