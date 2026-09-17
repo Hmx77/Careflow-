@@ -1,7 +1,9 @@
 (() => {
   const QZ_PRINTER_STORAGE_KEY = "careflow-qz-printer";
   const preferredPrinterNames = ["Printer POS-80", "POS-80", "POS80", "EZPOS"];
-  let lastSeenQueueNumber = "";
+
+  let resolvedPrinter = null;
+  let printing = false;
 
   function onReceptionPage() {
     return window.location.pathname.startsWith("/reception");
@@ -15,17 +17,23 @@
 
   async function ensureConnected() {
     const qz = getQz();
-    if (qz.websocket.isActive()) return qz;
-    await qz.websocket.connect({ retries: 3, delay: 1 });
+    if (!qz.websocket.isActive()) {
+      await qz.websocket.connect({ retries: 1, delay: 0.5 });
+    }
     return qz;
   }
 
   async function resolvePrinter(qz) {
+    if (resolvedPrinter) return resolvedPrinter;
+
     const saved = window.localStorage.getItem(QZ_PRINTER_STORAGE_KEY);
     if (saved) {
       try {
         const found = await qz.printers.find(saved);
-        if (found) return found;
+        if (found) {
+          resolvedPrinter = found;
+          return found;
+        }
       } catch (_) {
         window.localStorage.removeItem(QZ_PRINTER_STORAGE_KEY);
       }
@@ -38,6 +46,7 @@
     for (const preferred of preferredPrinterNames) {
       const match = normalized.find((printer) => printer.lower.includes(preferred.toLowerCase()));
       if (match) {
+        resolvedPrinter = match.name;
         window.localStorage.setItem(QZ_PRINTER_STORAGE_KEY, match.name);
         return match.name;
       }
@@ -46,6 +55,7 @@
     if (typeof qz.printers.getDefault === "function") {
       const defaultPrinter = await qz.printers.getDefault();
       if (defaultPrinter) {
+        resolvedPrinter = defaultPrinter;
         window.localStorage.setItem(QZ_PRINTER_STORAGE_KEY, defaultPrinter);
         return defaultPrinter;
       }
@@ -68,17 +78,24 @@
       GS + "!" + "\x33",
       `${queueNumber}\n`,
       GS + "!" + "\x00",
-      "\nPlease wait for your number to be called.\n",
+      "\nPlease wait to be called.\n",
       "\n\n\n",
       GS + "V" + "\x00",
     ];
   }
 
   async function printQueueTicket(queueNumber) {
-    const qz = await ensureConnected();
-    const printer = await resolvePrinter(qz);
-    const config = qz.configs.create(printer, { encoding: "CP437" });
-    await qz.print(config, ticketData(queueNumber));
+    if (!queueNumber || printing) return;
+    printing = true;
+
+    try {
+      const qz = await ensureConnected();
+      const printer = await resolvePrinter(qz);
+      const config = qz.configs.create(printer, { encoding: "CP437" });
+      await qz.print(config, ticketData(queueNumber));
+    } finally {
+      printing = false;
+    }
   }
 
   function currentQueueNumber() {
@@ -87,82 +104,68 @@
     return /^\d{3,}$/.test(number) ? number : "";
   }
 
-  function findPrintButton() {
-    return Array.from(document.querySelectorAll("button")).find((button) =>
-      /print small ticket|reprint ticket|printing|printer unavailable/i.test(button.textContent || ""),
-    );
+  function isPrintButton(button) {
+    return /print small ticket|reprint ticket|printer unavailable/i.test(button?.textContent || "");
   }
 
-  function setPrintButtonLabel(label) {
-    const button = findPrintButton();
-    if (!button) return;
-    const textNodes = Array.from(button.childNodes).filter((node) => node.nodeType === Node.TEXT_NODE);
-    if (textNodes.length) {
-      textNodes[textNodes.length - 1].textContent = `\n                ${label}\n              `;
-    } else {
-      button.append(document.createTextNode(label));
+  async function waitForNewQueueNumber(previousNumber) {
+    const timeoutAt = Date.now() + 5000;
+
+    while (Date.now() < timeoutAt) {
+      const current = currentQueueNumber();
+      if (current && current !== previousNumber) {
+        try {
+          await printQueueTicket(current);
+        } catch (error) {
+          console.error("CareFlow QZ auto-print failed:", error);
+        }
+        return;
+      }
+      await new Promise((resolve) => window.setTimeout(resolve, 120));
     }
   }
 
-  async function runPrint(queueNumber) {
-    if (!queueNumber) return;
-    setPrintButtonLabel("Printing...");
-    try {
-      await printQueueTicket(queueNumber);
-      setPrintButtonLabel("Reprint ticket");
-    } catch (error) {
-      console.error("CareFlow QZ printing failed:", error);
-      setPrintButtonLabel("Printer unavailable — Reprint");
-    }
-  }
+  document.addEventListener(
+    "submit",
+    (event) => {
+      if (!onReceptionPage()) return;
+      const form = event.target;
+      if (!(form instanceof HTMLFormElement) || !form.classList.contains("staff-panel")) return;
 
-  function maybeAutoPrint() {
-    if (!onReceptionPage()) return;
-    const number = currentQueueNumber();
-    if (!number || number === lastSeenQueueNumber) return;
-
-    // Mark it before printing so DOM changes caused by button labels cannot
-    // trigger another print of the same ticket.
-    lastSeenQueueNumber = number;
-    void runPrint(number);
-  }
+      const previousNumber = currentQueueNumber();
+      void waitForNewQueueNumber(previousNumber);
+    },
+    true,
+  );
 
   document.addEventListener(
     "click",
     (event) => {
       if (!onReceptionPage()) return;
-      const button = event.target.closest?.("button");
-      if (!button) return;
-      if (!/print small ticket|reprint ticket|printer unavailable/i.test(button.textContent || "")) return;
+      const target = event.target;
+      if (!(target instanceof Element)) return;
+
+      const button = target.closest("button");
+      if (!button || !isPrintButton(button)) return;
 
       event.preventDefault();
       event.stopPropagation();
       event.stopImmediatePropagation();
-      void runPrint(currentQueueNumber());
+
+      const number = currentQueueNumber();
+      if (!number) return;
+
+      void printQueueTicket(number).catch((error) => {
+        console.error("CareFlow QZ reprint failed:", error);
+      });
     },
     true,
   );
 
-  // Observe only structural React updates. Do not observe text changes, because
-  // changing the print-button label ourselves would otherwise retrigger the observer.
-  const observer = new MutationObserver(() => {
-    maybeAutoPrint();
-  });
-
-  function start() {
-    observer.observe(document.documentElement, { childList: true, subtree: true });
-    maybeAutoPrint();
-  }
-
-  if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", start, { once: true });
-  } else {
-    start();
-  }
-
   window.CareFlowQzPrinter = {
     printQueueTicket,
     clearSavedPrinter() {
+      resolvedPrinter = null;
       window.localStorage.removeItem(QZ_PRINTER_STORAGE_KEY);
     },
   };
