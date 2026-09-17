@@ -1,0 +1,73 @@
+.queue-table.careflow-category-columns {
+  display: grid;
+  grid-auto-flow: row dense;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  column-gap: 18px;
+  row-gap: 10px;
+}
+
+.queue-table.careflow-category-columns .queue-head {
+  display: none;
+}
+
+.queue-table.careflow-category-columns::before,
+.queue-table.careflow-category-columns::after {
+  color: #15364e;
+  font-size: 20px;
+  font-weight: 900;
+  padding: 4px 4px 8px;
+}
+
+.queue-table.careflow-category-columns::before {
+  content: "General";
+  grid-column: 1;
+  grid-row: 1;
+}
+
+.queue-table.careflow-category-columns::after {
+  content: "Dental";
+  grid-column: 2;
+  grid-row: 1;
+}
+
+.queue-table.careflow-category-columns .queue-row[data-careflow-category="general"] {
+  grid-column: 1;
+}
+
+.queue-table.careflow-category-columns .queue-row[data-careflow-category="dental"] {
+  grid-column: 2;
+}
+
+.queue-table.careflow-category-columns .queue-row:not(.queue-head) {
+  grid-template-columns: 86px 105px minmax(0, 1fr);
+  min-width: 0;
+}
+
+.queue-table.careflow-category-columns .row-actions {
+  min-width: 0;
+}
+
+#careflow-general-empty {
+  background: #f8fcfc;
+  border: 1px dashed #bed6da;
+  border-radius: 18px;
+  color: #58717b;
+  font-size: 18px;
+  padding: 26px;
+}
+
+@media (max-width: 920px) {
+  .queue-table.careflow-category-columns {
+    display: block;
+  }
+
+  .queue-table.careflow-category-columns::before,
+  .queue-table.careflow-category-columns::after {
+    display: block;
+    margin-top: 16px;
+  }
+
+  .queue-table.careflow-category-columns .queue-row:not(.queue-head) {
+    margin-bottom: 10px;
+  }
+}
