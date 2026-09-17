@@ -4,6 +4,7 @@
 
   let resolvedPrinter = null;
   let printing = false;
+  let securityConfigured = false;
 
   function onReceptionPage() {
     return window.location.pathname.startsWith("/reception");
@@ -15,8 +16,40 @@
     return qz;
   }
 
+  function configureSecurity(qz) {
+    if (securityConfigured) return;
+
+    qz.security.setCertificatePromise(async (resolve, reject) => {
+      try {
+        const response = await fetch("/api/qz-certificate", { cache: "no-store" });
+        if (!response.ok) throw new Error(await response.text());
+        resolve(await response.text());
+      } catch (error) {
+        reject(error);
+      }
+    });
+
+    qz.security.setSignatureAlgorithm("SHA512");
+    qz.security.setSignaturePromise((toSign) => async (resolve, reject) => {
+      try {
+        const response = await fetch("/api/qz-sign", {
+          method: "POST",
+          headers: { "Content-Type": "text/plain; charset=utf-8" },
+          body: toSign,
+        });
+        if (!response.ok) throw new Error(await response.text());
+        resolve(await response.text());
+      } catch (error) {
+        reject(error);
+      }
+    });
+
+    securityConfigured = true;
+  }
+
   async function ensureConnected() {
     const qz = getQz();
+    configureSecurity(qz);
     if (!qz.websocket.isActive()) {
       await qz.websocket.connect({ retries: 1, delay: 0.5 });
     }
@@ -101,7 +134,7 @@
   function currentQueueNumber() {
     const element = document.querySelector(".ticket-panel > strong");
     const number = element?.textContent?.trim() || "";
-    return /^\d{3,}$/.test(number) ? number : "";
+    return /^[A-Z]?\d{3,}$/.test(number) ? number : "";
   }
 
   function isPrintButton(button) {
