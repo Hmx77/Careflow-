@@ -187,6 +187,7 @@
           custom: true,
         },
         margins: 0,
+        orientation: "portrait",
         scaleContent: false,
         rasterize: false,
       });
