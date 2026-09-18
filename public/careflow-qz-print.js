@@ -1,5 +1,8 @@
 (() => {
   const QZ_PRINTER_STORAGE_KEY = "careflow-qz-printer";
+  const thermalTicketWidthMm = 57;
+  const thermalTicketHeightMm = 52;
+  const mmToPt = 72 / 25.4;
   const preferredPrinterNames = ["Printer POS-80", "POS-80", "POS80", "EZPOS"];
 
   let resolvedPrinter = null;
@@ -114,29 +117,58 @@
     throw new Error("Could not find the POS-80 printer in QZ Tray.");
   }
 
-  function ticketData(queueNumber) {
-    const ESC = "\x1B";
-    const GS = "\x1D";
+  async function createTicketPdfBase64(queueNumber) {
+    if (!window.PDFLib) {
+      throw new Error("PDF ticket generator is not loaded.");
+    }
 
-    return [
-      ESC + "@",
-      ESC + "a" + "\x01",
-      ESC + "E" + "\x01",
-      "Newcastle Medical Centre\n",
-      ESC + "E" + "\x00",
-      "\n",
-      ESC + "E" + "\x01",
-      "Queue Number\n",
-      ESC + "E" + "\x00",
-      "\n",
-      ESC + "E" + "\x01",
-      GS + "!" + "\x33",
-      `${queueNumber}\n`,
-      GS + "!" + "\x00",
-      ESC + "E" + "\x00",
-      "\n\n",
-      GS + "V" + "\x00",
-    ];
+    const { PDFDocument, StandardFonts, rgb } = window.PDFLib;
+    const pdfDocument = await PDFDocument.create();
+    const pageWidth = thermalTicketWidthMm * mmToPt;
+    const pageHeight = thermalTicketHeightMm * mmToPt;
+    const page = pdfDocument.addPage([pageWidth, pageHeight]);
+    const boldFont = await pdfDocument.embedFont(StandardFonts.HelveticaBold);
+    const black = rgb(0, 0, 0);
+    const clinicFontSize = 10.5;
+    const labelFontSize = 8.8;
+    const numberFontSize = 35;
+    const clinicGap = 4.5 * mmToPt;
+    const labelGap = 3 * mmToPt;
+    const clinicHeight = boldFont.heightAtSize(clinicFontSize);
+    const labelHeight = boldFont.heightAtSize(labelFontSize);
+    const numberHeight = boldFont.heightAtSize(numberFontSize);
+    const contentHeight = clinicHeight + clinicGap + labelHeight + labelGap + numberHeight;
+    let cursorY = pageHeight - (pageHeight - contentHeight) / 2;
+
+    drawCenteredText(page, boldFont, "Newcastle Medical Centre", clinicFontSize, cursorY - clinicHeight, pageWidth, black);
+    cursorY -= clinicHeight + clinicGap;
+
+    drawCenteredText(page, boldFont, "Queue Number", labelFontSize, cursorY - labelHeight, pageWidth, black);
+    cursorY -= labelHeight + labelGap;
+
+    drawCenteredText(page, boldFont, queueNumber, numberFontSize, cursorY - numberHeight, pageWidth, black);
+
+    const pdfBytes = await pdfDocument.save();
+    return uint8ArrayToBase64(pdfBytes);
+  }
+
+  function drawCenteredText(page, font, text, size, y, pageWidth, color) {
+    page.drawText(text, {
+      x: (pageWidth - font.widthOfTextAtSize(text, size)) / 2,
+      y,
+      size,
+      font,
+      color,
+    });
+  }
+
+  function uint8ArrayToBase64(bytes) {
+    let binary = "";
+    const chunkSize = 0x8000;
+    for (let index = 0; index < bytes.length; index += chunkSize) {
+      binary += String.fromCharCode(...bytes.slice(index, index + chunkSize));
+    }
+    return window.btoa(binary);
   }
 
   async function printQueueTicket(queueNumber) {
@@ -146,8 +178,28 @@
     try {
       const qz = await ensureConnected();
       const printer = await resolvePrinter(qz);
-      const config = qz.configs.create(printer, { encoding: "CP437" });
-      await qz.print(config, ticketData(queueNumber));
+      const pdfBase64 = await createTicketPdfBase64(queueNumber);
+      const config = qz.configs.create(printer, {
+        units: "mm",
+        size: {
+          width: thermalTicketWidthMm,
+          height: thermalTicketHeightMm,
+          custom: true,
+        },
+        margins: 0,
+        orientation: "portrait",
+        scaleContent: false,
+        rasterize: false,
+      });
+
+      await qz.print(config, [
+        {
+          type: "pixel",
+          format: "pdf",
+          flavor: "base64",
+          data: pdfBase64,
+        },
+      ]);
     } finally {
       printing = false;
     }
