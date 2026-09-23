@@ -193,7 +193,7 @@ if (!hasSupabaseConfig) {
       display.includes("GENERAL") &&
       display.includes("DENTAL") &&
       display.includes("Now Serving") &&
-      display.includes("Recent") &&
+      display.includes("Upcoming") &&
       display.includes("Thank you for your patience") &&
       !display.includes("Patient Queue Display") &&
       !display.includes(["Private", "queue display"].join(" "));
@@ -223,7 +223,7 @@ if (!hasSupabaseConfig) {
     results.nurse =
       nurse.includes("Call next") &&
       nurse.includes("General Nurse") &&
-      nurse.includes("Search appointment patient or queue number") &&
+      nurse.includes("Search patient name or queue number") &&
       !nurse.includes("Create Queue Number") &&
       !nurse.includes("Optional internal reference");
   }

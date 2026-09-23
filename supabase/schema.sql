@@ -108,10 +108,6 @@ begin
     raise exception 'Patient name is required for appointment queue numbers.' using errcode = '23514';
   end if;
 
-  if input_category in ('general_walk_in', 'dental_walk_in') then
-    trimmed_patient_name := null;
-  end if;
-
   perform pg_advisory_xact_lock(hashtext('careflow_queue_code_' || queue_prefix));
 
   with public_codes as (

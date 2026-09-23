@@ -52,6 +52,10 @@ const checks = {
     /if not public\.careflow_is_staff\(\) then[\s\S]*Staff access required/i.test(migration),
   createRpcRejectsNullCategory:
     /if input_category is null[\s\S]*input_category not in/i.test(migration),
+  createRpcRequiresAppointmentNames:
+    /if input_category in \('general_appointment', 'dental_appointment'\) and trimmed_patient_name is null then[\s\S]*Patient name is required/i.test(migration),
+  createRpcAllowsOptionalWalkInNames:
+    !/if input_category in \('general_walk_in', 'dental_walk_in'\) then[\s\S]*trimmed_patient_name := null;[\s\S]*end if;/i.test(migration),
   createRpcUsesAdvisoryLock:
     /pg_advisory_xact_lock\(hashtext\('careflow_queue_code_' \|\| queue_prefix\)\)/i.test(migration),
   createRpcWritesPrivateNames:
@@ -69,6 +73,16 @@ const checks = {
     !/from\("queue"\)[\s\S]{0,160}patient_name/.test(queueStore),
   appUsesCreateRpc:
     /\.rpc\("careflow_create_queue_item"/.test(queueStore),
+  appPassesOptionalWalkInNamesToRpc:
+    /input_patient_name: patientName \|\| null/.test(queueStore),
+  staffNameSearchIsNotAppointmentOnly:
+    /placeholder="Search patient name or queue number"/.test(main) &&
+    /const name = item\.patientName \|\| \(isAppointmentCode\(item\.code\) \? fallback : ""\)/.test(main),
+  publicDisplayUsesUpcomingWaitingQueue:
+    /const generalUpcoming = getUpcomingDepartmentItems\(items, "general", generalNowServing\?\.id\)/.test(main) &&
+    /return getWaitingQueue\(items, department\)[\s\S]*\.slice\(0, 4\)/.test(main) &&
+    /<span>Upcoming<\/span>/.test(main) &&
+    !/<span>Recent<\/span>/.test(main),
   staffRoutesUseSupabaseAuthGate:
     /<Route path="\/reception" element={<StaffGate><ReceptionPage \/><\/StaffGate>} \/>/.test(main) &&
     /<Route path="\/nurse" element={<StaffGate><NursePage \/><\/StaffGate>} \/>/.test(main) &&

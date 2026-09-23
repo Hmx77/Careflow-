@@ -194,7 +194,7 @@ export async function createQueueItem(input: {
         .rpc("careflow_create_queue_item", {
           input_category: input.category,
           input_priority: input.priority ?? "normal",
-          input_patient_name: isAppointmentCategory(input.category) ? patientName : null,
+          input_patient_name: patientName || null,
           input_internal_reference: input.optionalInternalReference?.trim() || null,
           input_phone_number: input.optionalPhoneNumber?.trim() || null,
         })

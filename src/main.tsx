@@ -228,7 +228,7 @@ function ReceptionPage() {
     try {
       const item = await createQueueItem({
         category,
-        patientName: isAppointment ? patientName : undefined,
+        patientName,
         optionalInternalReference,
         optionalPhoneNumber,
       });
@@ -316,7 +316,7 @@ function ReceptionPage() {
       </header>
       {toast && <div className={`toast toast-${toast.type}`} role="status">{toast.message}</div>}
       {privateNames.error && <div className="toast toast-error" role="status">{privateNames.error}</div>}
-      <StaffSearchPanel items={activeStaffQueue} placeholder="Search appointment patient or queue number" />
+      <StaffSearchPanel items={activeStaffQueue} placeholder="Search patient name or queue number" />
       <section className="dashboard-grid">
         <form className="staff-panel" onSubmit={submit}>
           <h1>Create Queue Number</h1>
@@ -345,7 +345,7 @@ function ReceptionPage() {
             </section>
           </div>
           <label>
-            Appointment patient name <span>required for AG / AD only</span>
+            Patient name <span>required for AG / AD, optional for G / D</span>
             <input value={patientName} onChange={(event) => setPatientName(event.target.value)} placeholder="Patient name" autoComplete="off" />
           </label>
           <label>
@@ -651,7 +651,7 @@ function DepartmentStaffPage({
         {actionError && <p className="form-error">{actionError}</p>}
         {privateNames.error && <p className="form-error">{privateNames.error}</p>}
 
-        <StaffSearchPanel items={activeStaffQueue} department={department} placeholder="Search appointment patient or queue number" />
+        <StaffSearchPanel items={activeStaffQueue} department={department} placeholder="Search patient name or queue number" />
 
         <section className="next-patient-panel" aria-label={`${title} next patient`}>
           <span>Next Patient</span>
@@ -739,8 +739,8 @@ function DisplayPage() {
   const { items } = queue;
   const generalNowServing = getNowServing(items, "general");
   const dentalNowServing = getNowServing(items, "dental");
-  const generalRecent = getRecentDepartmentItems(items, "general", generalNowServing?.id);
-  const dentalRecent = getRecentDepartmentItems(items, "dental", dentalNowServing?.id);
+  const generalUpcoming = getUpcomingDepartmentItems(items, "general", generalNowServing?.id);
+  const dentalUpcoming = getUpcomingDepartmentItems(items, "dental", dentalNowServing?.id);
   const hasInitializedRef = React.useRef(false);
   const lastAnnouncedTicketIdsRef = React.useRef<{ general: string | null; dental: string | null }>({ general: null, dental: null });
 
@@ -804,8 +804,8 @@ function DisplayPage() {
         </header>
 
         <div className="display-board display-board-columns">
-          <DisplayDepartmentColumn title="General" nowServing={generalNowServing} recent={generalRecent} />
-          <DisplayDepartmentColumn title="Dental" nowServing={dentalNowServing} recent={dentalRecent} />
+          <DisplayDepartmentColumn title="General" nowServing={generalNowServing} upcoming={generalUpcoming} />
+          <DisplayDepartmentColumn title="Dental" nowServing={dentalNowServing} upcoming={dentalUpcoming} />
         </div>
 
         <p className="display-instruction">Thank you for your patience</p>
@@ -817,11 +817,11 @@ function DisplayPage() {
 function DisplayDepartmentColumn({
   title,
   nowServing,
-  recent,
+  upcoming,
 }: {
   title: string;
   nowServing?: QueueItem;
-  recent: QueueItem[];
+  upcoming: QueueItem[];
 }) {
   return (
     <section className="department-display display-panel" aria-label={`${title} queue`}>
@@ -841,8 +841,8 @@ function DisplayDepartmentColumn({
         )}
       </div>
       <div className="department-recent">
-        <span>Recent</span>
-        {recent.length ? recent.map((item) => <strong key={item.id}>{formatQueueCode(item)}</strong>) : <em>No recent tickets</em>}
+        <span>Upcoming</span>
+        {upcoming.length ? upcoming.map((item) => <strong key={item.id}>{formatQueueCode(item)}</strong>) : <em>No waiting tickets</em>}
       </div>
     </section>
   );
@@ -1041,8 +1041,8 @@ function statusLabel(status: QueueStatus) {
 }
 
 function PatientNameLine({ item, fallback = "" }: { item: StaffQueueItem; fallback?: string }) {
-  if (!isAppointmentCode(item.code)) return null;
-  return <p>{item.patientName || fallback}</p>;
+  const name = item.patientName || (isAppointmentCode(item.code) ? fallback : "");
+  return name ? <p>{name}</p> : null;
 }
 
 function searchQueueItems(items: StaffQueueItem[], query: string, department?: QueueDepartment) {
@@ -1096,13 +1096,10 @@ function getStaffDisplayQueue(activeQueue: StaffQueueItem[], waitingQueue: Staff
   return [...waitingQueue, ...activeQueue.filter((item) => !waitingIds.has(item.id))];
 }
 
-function getRecentDepartmentItems(items: QueueItem[], department: QueueDepartment, currentId?: string) {
-  return items
-    .filter((item) => queueDepartmentForCode(item.code) === department)
-    .filter((item) => item.id !== currentId && !isClearedQueueItem(item))
-    .filter((item) => item.status === "called" || item.status === "in_progress" || item.status === "completed")
-    .sort((a, b) => b.createdAt - a.createdAt)
-    .slice(0, 3);
+function getUpcomingDepartmentItems(items: QueueItem[], department: QueueDepartment, currentId?: string) {
+  return getWaitingQueue(items, department)
+    .filter((item) => item.id !== currentId)
+    .slice(0, 4);
 }
 
 function patientStatusText(status: QueueStatus, isCleared = false) {
