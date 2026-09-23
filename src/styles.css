@@ -869,12 +869,13 @@ a {
 .display-screen {
   align-items: stretch;
   display: grid;
-  gap: clamp(14px, 1.8vh, 22px);
+  gap: clamp(10px, 1.6vh, 22px);
   grid-template-rows: auto minmax(0, 1fr) auto;
+  height: 100vh;
   max-height: 100vh;
   min-height: 100vh;
   overflow: hidden;
-  padding: clamp(22px, 3vh, 34px) clamp(34px, 4.2vw, 72px);
+  padding: clamp(16px, 2.4vh, 34px) clamp(28px, 4.2vw, 72px);
   position: relative;
 }
 
@@ -922,7 +923,8 @@ a {
   border-radius: 28px;
   box-shadow: 0 26px 70px rgba(0, 0, 0, 0.18);
   min-height: 0;
-  padding: clamp(26px, 3.2vh, 44px);
+  overflow: hidden;
+  padding: clamp(16px, min(2.4vh, 2.8vw), 42px);
 }
 
 .now-serving {
@@ -1002,13 +1004,14 @@ a {
 
 .department-display {
   display: grid;
-  gap: clamp(18px, 2vh, 28px);
-  grid-template-rows: auto minmax(0, 1fr) auto;
+  gap: clamp(10px, min(1.5vh, 1.7vw), 26px);
+  grid-template-rows: max-content minmax(0, 1fr) max-content;
+  min-height: 0;
 }
 
 .department-display h2 {
   color: #ffffff;
-  font-size: clamp(34px, 3.4vw, 58px);
+  font-size: clamp(28px, min(3vw, 6vh), 58px);
   line-height: 1;
   margin: 0;
   text-align: center;
@@ -1019,6 +1022,7 @@ a {
   align-content: center;
   display: grid;
   min-height: 0;
+  overflow: hidden;
   text-align: center;
 }
 
@@ -1026,7 +1030,7 @@ a {
 .department-recent span {
   color: #cbdcf4;
   display: block;
-  font-size: clamp(22px, 2vw, 34px);
+  font-size: clamp(18px, min(1.8vw, 3.6vh), 34px);
   font-weight: 900;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -1035,23 +1039,24 @@ a {
 .department-now-serving strong {
   color: #ffffff;
   display: block;
-  font-size: clamp(112px, 12vw, 210px);
+  font-size: clamp(88px, min(9.5vw, 17vh), 210px);
   letter-spacing: 0;
   line-height: 0.9;
-  margin: clamp(14px, 2vh, 24px) 0;
+  margin: clamp(6px, 1.3vh, 24px) 0;
   text-shadow: 0 18px 55px rgba(0, 0, 0, 0.22);
 }
 
 .department-now-serving p {
   color: #ffffff;
-  font-size: clamp(22px, 2.2vw, 36px);
+  font-size: clamp(16px, min(1.8vw, 3.6vh), 36px);
   font-weight: 900;
   margin: 0;
 }
 
 .department-recent {
   display: grid;
-  gap: 10px;
+  gap: clamp(6px, 0.9vh, 10px);
+  min-height: 0;
 }
 
 .department-recent strong {
@@ -1059,10 +1064,10 @@ a {
   border-left: 8px solid var(--red);
   border-radius: 14px;
   color: var(--blue-dark);
-  font-size: clamp(34px, 4vw, 64px);
+  font-size: clamp(28px, min(3.6vw, 5vh), 64px);
   font-weight: 950;
   line-height: 1;
-  padding: clamp(10px, 1.3vh, 16px) clamp(18px, 2vw, 28px);
+  padding: clamp(6px, 1vh, 16px) clamp(16px, 2vw, 28px);
   text-align: center;
 }
 
