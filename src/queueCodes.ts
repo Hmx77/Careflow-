@@ -1,6 +1,7 @@
 export type QueueCodeStatus = "waiting" | "called" | "in_progress" | "completed" | "delayed";
-export type QueueCategory = "dental" | "general";
-export type QueuePrefix = "D" | "G" | "NC";
+export type QueueCategory = "dental_walk_in" | "general_walk_in" | "dental_appointment" | "general_appointment";
+export type QueueDepartment = "dental" | "general";
+export type QueuePrefix = "AD" | "AG" | "D" | "G" | "NC";
 
 export type QueueCodeRecord = {
   code: string;
@@ -29,12 +30,12 @@ export function nextQueueCodeForSession(rows: QueueCodeRecord[], category: Queue
 }
 
 export function queueLocationForCategory(category: QueueCategory) {
-  return category === "dental" ? "Dental Clinic" : "Nurse Station";
+  return queueDepartmentForCategory(category) === "dental" ? "Dental Clinic" : "Nurse Station";
 }
 
 export function queueLocationForCode(code: string) {
   const parsed = parseQueueCode(formatQueueCode(code));
-  return parsed?.prefix === "D" ? "Dental Clinic" : "Nurse Station";
+  return parsed?.prefix === "D" || parsed?.prefix === "AD" ? "Dental Clinic" : "Nurse Station";
 }
 
 export function queueProceedInstruction(code: string) {
@@ -63,7 +64,7 @@ export function formatQueueCode(itemOrCode: QueueCodeRecord | string) {
 
   const code = typeof itemOrCode === "string" ? itemOrCode : itemOrCode.code;
   const parsed = parseQueueCode(code);
-  if (parsed?.prefix === "D" || parsed?.prefix === "G") {
+  if (parsed && parsed.prefix !== "NC") {
     return `${parsed.prefix}${String(parsed.number || 1).padStart(3, "0")}`;
   }
 
@@ -73,7 +74,7 @@ export function formatQueueCode(itemOrCode: QueueCodeRecord | string) {
 export function storageQueueCode(input: string) {
   const parsed = parseQueueCode(input);
   const value = parsed?.number || 1;
-  if (parsed?.prefix === "D" || parsed?.prefix === "G") {
+  if (parsed && parsed.prefix !== "NC") {
     return `${parsed.prefix}-${String(value).padStart(3, "0")}`;
   }
   return `NC-${String(value).padStart(3, "0")}`;
@@ -90,8 +91,36 @@ export function archiveQueueCode(id: string, originalCode: string) {
   return `${prefix}-${Date.now()}${rowSeed}`;
 }
 
-function queuePrefixForCategory(category: QueueCategory): Extract<QueuePrefix, "D" | "G"> {
-  return category === "dental" ? "D" : "G";
+export function queueDepartmentForCategory(category: QueueCategory): QueueDepartment {
+  return category === "dental_walk_in" || category === "dental_appointment" ? "dental" : "general";
+}
+
+export function queueDepartmentForCode(code: string): QueueDepartment {
+  const prefix = queuePrefixFromCode(code);
+  return prefix === "D" || prefix === "AD" ? "dental" : "general";
+}
+
+export function isAppointmentCategory(category: QueueCategory) {
+  return category === "general_appointment" || category === "dental_appointment";
+}
+
+export function isAppointmentCode(code: string) {
+  const prefix = queuePrefixFromCode(code);
+  return prefix === "AG" || prefix === "AD";
+}
+
+export function queueTypeLabelForCode(code: string) {
+  const prefix = queuePrefixFromCode(code);
+  if (prefix === "AG") return "General Appointment";
+  if (prefix === "AD") return "Dental Appointment";
+  if (prefix === "D") return "Dental Walk-in";
+  return "General Walk-in";
+}
+
+function queuePrefixForCategory(category: QueueCategory): Exclude<QueuePrefix, "NC"> {
+  if (category === "dental_appointment") return "AD";
+  if (category === "general_appointment") return "AG";
+  return category === "dental_walk_in" ? "D" : "G";
 }
 
 function queuePrefixFromCode(code: string): QueuePrefix {
@@ -100,7 +129,7 @@ function queuePrefixFromCode(code: string): QueuePrefix {
 
 export function parseQueueCode(code: string): { prefix: QueuePrefix; number: number } | null {
   const clean = code.trim().toUpperCase().replace(/\s+/g, "");
-  const prefixed = clean.match(/^(D|G|NC)-?(\d+)$/);
+  const prefixed = clean.match(/^(AD|AG|D|G|NC)-?(\d+)$/);
   const numericOnly = clean.match(/^(\d+)$/);
   const prefix = prefixed?.[1] as QueuePrefix | undefined;
   const rawNumber = prefixed?.[2] ?? numericOnly?.[1];

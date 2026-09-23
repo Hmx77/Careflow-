@@ -444,6 +444,27 @@ a {
   gap: 14px;
 }
 
+.queue-create-groups {
+  display: grid;
+  gap: 14px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.queue-create-group {
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+}
+
+.queue-create-group h2 {
+  color: #15364e;
+  font-size: 17px;
+  margin: 0 0 2px;
+  text-transform: uppercase;
+}
+
 .staff-panel h1,
 .admin-panel h1 {
   color: #15364e;
@@ -607,6 +628,105 @@ a {
   gap: 12px;
 }
 
+.staff-search-panel {
+  background: #ffffff;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  display: grid;
+  gap: 12px;
+  margin: 0 auto 18px;
+  max-width: 1360px;
+  padding: 14px;
+}
+
+.nurse-panel .staff-search-panel {
+  margin-bottom: 18px;
+  max-width: none;
+}
+
+.staff-search-panel label {
+  align-items: center;
+  color: var(--blue-dark);
+  display: flex;
+  gap: 10px;
+}
+
+.staff-search-panel input {
+  background: #ffffff;
+  border: 0;
+  color: #162f42;
+  flex: 1;
+  min-height: 42px;
+  min-width: 0;
+  outline: 0;
+}
+
+.search-results {
+  display: grid;
+  gap: 8px;
+}
+
+.search-result {
+  align-items: center;
+  background: #f8fcfc;
+  border: 1px solid #e4eff0;
+  border-radius: 14px;
+  display: grid;
+  gap: 12px;
+  grid-template-columns: 120px 1fr;
+  padding: 12px;
+}
+
+.search-result strong {
+  color: var(--blue-dark);
+  font-size: 28px;
+}
+
+.search-result p,
+.search-result span,
+.search-result small {
+  color: #58717b;
+  display: block;
+  font-size: 14px;
+  font-weight: 800;
+  margin: 0;
+}
+
+.search-result p {
+  color: #15364e;
+  font-size: 16px;
+}
+
+.next-patient-panel {
+  background: #eef5ff;
+  border: 1px solid #c8d9f0;
+  border-radius: 18px;
+  display: grid;
+  gap: 8px;
+  margin-bottom: 18px;
+  padding: 20px;
+}
+
+.next-patient-panel span {
+  color: #526d78;
+  font-size: 13px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.next-patient-panel strong {
+  color: var(--blue-dark);
+  font-size: 54px;
+  line-height: 1;
+}
+
+.next-patient-panel p {
+  color: #294a5b;
+  font-size: 17px;
+  font-weight: 800;
+  margin: 0;
+}
+
 .nurse-card {
   align-items: center;
   background: #f8fcfc;
@@ -708,7 +828,7 @@ a {
   border-radius: 16px;
   display: grid;
   gap: 12px;
-  grid-template-columns: 120px 140px minmax(320px, 1fr);
+  grid-template-columns: 120px 170px 120px minmax(320px, 1fr);
   min-height: 72px;
   padding: 12px;
 }
@@ -792,6 +912,10 @@ a {
   min-height: 0;
 }
 
+.display-board-columns {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
 .display-panel {
   background: rgba(255, 255, 255, 0.1);
   border: 1px solid rgba(255, 255, 255, 0.18);
@@ -872,6 +996,79 @@ a {
 .next-strip em {
   color: #d2eef0;
   font-size: clamp(24px, 2.4vw, 34px);
+  font-style: normal;
+  font-weight: 800;
+}
+
+.department-display {
+  display: grid;
+  gap: clamp(18px, 2vh, 28px);
+  grid-template-rows: auto minmax(0, 1fr) auto;
+}
+
+.department-display h2 {
+  color: #ffffff;
+  font-size: clamp(34px, 3.4vw, 58px);
+  line-height: 1;
+  margin: 0;
+  text-align: center;
+  text-transform: uppercase;
+}
+
+.department-now-serving {
+  align-content: center;
+  display: grid;
+  min-height: 0;
+  text-align: center;
+}
+
+.department-now-serving span,
+.department-recent span {
+  color: #cbdcf4;
+  display: block;
+  font-size: clamp(22px, 2vw, 34px);
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.department-now-serving strong {
+  color: #ffffff;
+  display: block;
+  font-size: clamp(112px, 12vw, 210px);
+  letter-spacing: 0;
+  line-height: 0.9;
+  margin: clamp(14px, 2vh, 24px) 0;
+  text-shadow: 0 18px 55px rgba(0, 0, 0, 0.22);
+}
+
+.department-now-serving p {
+  color: #ffffff;
+  font-size: clamp(22px, 2.2vw, 36px);
+  font-weight: 900;
+  margin: 0;
+}
+
+.department-recent {
+  display: grid;
+  gap: 10px;
+}
+
+.department-recent strong {
+  background: #ffffff;
+  border-left: 8px solid var(--red);
+  border-radius: 14px;
+  color: var(--blue-dark);
+  font-size: clamp(34px, 4vw, 64px);
+  font-weight: 950;
+  line-height: 1;
+  padding: clamp(10px, 1.3vh, 16px) clamp(18px, 2vw, 28px);
+  text-align: center;
+}
+
+.department-recent em {
+  color: #d2eef0;
+  font-size: clamp(20px, 2vw, 30px);
   font-style: normal;
   font-weight: 800;
 }
@@ -1143,7 +1340,7 @@ a {
   }
 
   .queue-row {
-    min-width: 620px;
+    min-width: 760px;
   }
 }
 
@@ -1169,6 +1366,12 @@ a {
   .next-strip {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .queue-create-groups,
+  .display-board-columns,
+  .search-result {
+    grid-template-columns: 1fr;
   }
 
   .step-card {

@@ -9,25 +9,32 @@ import {
   clearAllQueueItems,
   createQueueItem,
   getActiveQueue,
+  getDepartmentQueue,
   findQueueItemByCode,
   formatQueueCode,
   getNowServing,
   getWaitingQueue,
+  isAppointmentCode,
   isClearedQueueItem,
   QueueCategory,
+  QueueDepartment,
   QueueItem,
+  queueDepartmentForCode,
   queueProceedInstruction,
   QueueStatus,
+  signInStaff,
+  signOutStaff,
+  queueTypeLabelForCode,
   updateQueueStatus,
+  useQueuePrivateNames,
   useQueueStore,
+  useStaffSession,
 } from "./queueStore";
 import "./styles.css";
 
-const staffSessionKey = "careflow-newcastle-staff-pin";
-const staffPin = "1234";
 const publicAppUrl = (import.meta.env.VITE_PUBLIC_APP_URL || "https://careflow-newcastle.vercel.app").replace(/\/$/, "");
 
-// Demo only: this PIN gate is for controlled previews and must be replaced with real staff authentication before production.
+type StaffQueueItem = QueueItem & { patientName?: string };
 
 function BrandMark({ compact = false }: { compact?: boolean }) {
   return (
@@ -111,7 +118,7 @@ function JoinPage() {
         <p>Use this page only if you need to type the code from your ticket.</p>
         <form onSubmit={submit} className="join-form">
           <label htmlFor="queue-code">Queue code</label>
-          <input id="queue-code" value={code} onChange={(event) => setCode(event.target.value)} placeholder="D001 or G001" autoComplete="off" />
+          <input id="queue-code" value={code} onChange={(event) => setCode(event.target.value)} placeholder="AG001 or G001" autoComplete="off" />
           <button className="button button-primary button-full" type="submit">
             <Search size={22} />
             View my queue status
@@ -183,8 +190,10 @@ function ReceptionPage() {
   const queue = useQueueStore();
   const { items } = queue;
   const activeQueue = getActiveQueue(items);
+  const privateNames = useQueuePrivateNames(queue.configured);
+  const activeStaffQueue = withPrivateNames(activeQueue, privateNames.namesByQueueId);
   const waitingQueue = getWaitingQueue(items);
-  const [category, setCategory] = React.useState<QueueCategory | "">("");
+  const [patientName, setPatientName] = React.useState("");
   const [optionalInternalReference, setOptionalInternalReference] = React.useState("");
   const [optionalPhoneNumber, setOptionalPhoneNumber] = React.useState("");
   const [created, setCreated] = React.useState<QueueItem | null>(null);
@@ -205,16 +214,28 @@ function ReceptionPage() {
   async function submit(event: React.FormEvent) {
     event.preventDefault();
     setActionError("");
+    const submitter = (event.nativeEvent as SubmitEvent).submitter as HTMLButtonElement | null;
+    const category = submitter?.value as QueueCategory | undefined;
     if (!category) {
-      setActionError("Select Dental or General before creating a queue number.");
+      setActionError("Choose the queue type before creating a queue number.");
+      return;
+    }
+    const isAppointment = category === "general_appointment" || category === "dental_appointment";
+    if (isAppointment && !patientName.trim()) {
+      setActionError("Enter the appointment patient's name before creating an appointment queue number.");
       return;
     }
     try {
-      const item = await createQueueItem({ category, optionalInternalReference, optionalPhoneNumber });
+      const item = await createQueueItem({
+        category,
+        patientName: isAppointment ? patientName : undefined,
+        optionalInternalReference,
+        optionalPhoneNumber,
+      });
       setCreated(item);
       setQrVisible(false);
       setCopyState("Copy patient link");
-      setCategory("");
+      setPatientName("");
       setOptionalInternalReference("");
       setOptionalPhoneNumber("");
     } catch (error) {
@@ -289,25 +310,44 @@ function ReceptionPage() {
             Call next
           </button>
           <Link className="text-link" to="/nurse">Nurse</Link>
+          <Link className="text-link" to="/dental">Dental</Link>
           <Link className="text-link" to="/display">Queue display</Link>
         </div>
       </header>
       {toast && <div className={`toast toast-${toast.type}`} role="status">{toast.message}</div>}
+      {privateNames.error && <div className="toast toast-error" role="status">{privateNames.error}</div>}
+      <StaffSearchPanel items={activeStaffQueue} placeholder="Search appointment patient or queue number" />
       <section className="dashboard-grid">
         <form className="staff-panel" onSubmit={submit}>
           <h1>Create Queue Number</h1>
+          <div className="queue-create-groups">
+            <section className="queue-create-group" aria-label="General queue creation">
+              <h2>General</h2>
+              <button className="button button-secondary button-full" name="category" value="general_walk_in" type="submit">
+                <Ticket size={22} />
+                General Walk-in
+              </button>
+              <button className="button button-primary button-full" name="category" value="general_appointment" type="submit">
+                <Ticket size={22} />
+                General Appointment
+              </button>
+            </section>
+            <section className="queue-create-group" aria-label="Dental queue creation">
+              <h2>Dental</h2>
+              <button className="button button-secondary button-full" name="category" value="dental_walk_in" type="submit">
+                <Ticket size={22} />
+                Dental Walk-in
+              </button>
+              <button className="button button-primary button-full" name="category" value="dental_appointment" type="submit">
+                <Ticket size={22} />
+                Dental Appointment
+              </button>
+            </section>
+          </div>
           <label>
-            Category <span>required</span>
-            <select value={category} onChange={(event) => setCategory(event.target.value as QueueCategory | "")} required>
-              <option value="">Select category</option>
-              <option value="dental">Dental</option>
-              <option value="general">General</option>
-            </select>
+            Appointment patient name <span>required for AG / AD only</span>
+            <input value={patientName} onChange={(event) => setPatientName(event.target.value)} placeholder="Patient name" autoComplete="off" />
           </label>
-          <button className="button button-primary button-full" type="submit" disabled={!category}>
-            <Ticket size={22} />
-            Create Queue Number
-          </button>
           <label>
             Optional internal reference <span>staff-only</span>
             <input value={optionalInternalReference} onChange={(event) => setOptionalInternalReference(event.target.value)} placeholder="Reference" />
@@ -374,6 +414,7 @@ function ReceptionPage() {
           <div className="queue-table" role="table" aria-label="Reception queue table">
             <div className="queue-row queue-head" role="row">
               <span>Code</span>
+              <span>Type</span>
               <span>Status</span>
               <span>Actions</span>
             </div>
@@ -486,11 +527,79 @@ function ConfirmClearModal({
   );
 }
 
+function StaffSearchPanel({
+  items,
+  department,
+  placeholder,
+}: {
+  items: StaffQueueItem[];
+  department?: QueueDepartment;
+  placeholder: string;
+}) {
+  const [query, setQuery] = React.useState("");
+  const results = React.useMemo(() => searchQueueItems(items, query, department), [items, query, department]);
+  const hasQuery = Boolean(query.trim());
+
+  return (
+    <section className="staff-search-panel" aria-label="Staff queue search">
+      <label htmlFor={`staff-search-${department || "all"}`}>
+        <Search size={20} />
+        <input
+          id={`staff-search-${department || "all"}`}
+          value={query}
+          onChange={(event) => setQuery(event.target.value)}
+          placeholder={placeholder}
+          autoComplete="off"
+        />
+      </label>
+      {hasQuery && (
+        <div className="search-results">
+          {results.length ? (
+            results.map((item) => (
+              <article className="search-result" key={item.id}>
+                <strong>{formatQueueCode(item)}</strong>
+                <div>
+                  <PatientNameLine item={item} fallback="No appointment name" />
+                  <span>{queueTypeLabelForCode(item.code)}</span>
+                  <small>{statusLabel(item.status)}{queueAheadText(items, item)}</small>
+                </div>
+              </article>
+            ))
+          ) : (
+            <p>No active queue match.</p>
+          )}
+        </div>
+      )}
+    </section>
+  );
+}
+
 function NursePage() {
+  return <DepartmentStaffPage department="general" title="General Nurse" description="Manage General appointment and walk-in queue numbers." />;
+}
+
+function DentalPage() {
+  return <DepartmentStaffPage department="dental" title="Dental" description="Manage Dental appointment and walk-in queue numbers." />;
+}
+
+function DepartmentStaffPage({
+  department,
+  title,
+  description,
+}: {
+  department: QueueDepartment;
+  title: string;
+  description: string;
+}) {
   const queue = useQueueStore();
   const { items } = queue;
-  const activeQueue = getActiveQueue(items);
-  const waitingQueue = getWaitingQueue(items);
+  const activeQueue = getDepartmentQueue(items, department);
+  const privateNames = useQueuePrivateNames(queue.configured);
+  const activeStaffQueue = withPrivateNames(activeQueue, privateNames.namesByQueueId);
+  const waitingQueue = getWaitingQueue(items, department);
+  const waitingStaffQueue = withPrivateNames(waitingQueue, privateNames.namesByQueueId);
+  const staffQueue = getStaffDisplayQueue(activeStaffQueue, waitingStaffQueue);
+  const nextPatient = waitingStaffQueue[0];
   const [actionError, setActionError] = React.useState("");
 
   async function runAction(action: () => Promise<void>) {
@@ -519,10 +628,11 @@ function NursePage() {
       <header className="dashboard-header">
         <BrandMark />
         <div className="header-actions">
-          <button className="button button-primary compact-button" onClick={() => runAction(callNextQueueItem)} disabled={!waitingQueue.length} type="button">
+          <button className="button button-primary compact-button" onClick={() => runAction(() => callNextQueueItem(department))} disabled={!waitingQueue.length} type="button">
             <Bell size={20} />
             Call next
           </button>
+          {department === "general" ? <Link className="text-link" to="/dental">Dental</Link> : <Link className="text-link" to="/nurse">Nurse</Link>}
           <Link className="text-link" to="/display">Queue display</Link>
           <Link className="text-link" to="/reception">Reception</Link>
         </div>
@@ -534,15 +644,35 @@ function NursePage() {
             <Stethoscope size={28} />
           </div>
           <div>
-            <h1>Nurse</h1>
-            <p>Manage called and waiting queue numbers.</p>
+            <h1>{title}</h1>
+            <p>{description}</p>
           </div>
         </div>
         {actionError && <p className="form-error">{actionError}</p>}
+        {privateNames.error && <p className="form-error">{privateNames.error}</p>}
 
-        {activeQueue.length ? (
+        <StaffSearchPanel items={activeStaffQueue} department={department} placeholder="Search appointment patient or queue number" />
+
+        <section className="next-patient-panel" aria-label={`${title} next patient`}>
+          <span>Next Patient</span>
+          {nextPatient ? (
+            <>
+              <strong>{formatQueueCode(nextPatient)}</strong>
+              <PatientNameLine item={nextPatient} />
+              <p>{queueTypeLabelForCode(nextPatient.code)}</p>
+              <button className="button button-primary compact-button" onClick={() => runAction(() => callQueueItem(nextPatient.id))} type="button">
+                <Bell size={20} />
+                Call {formatQueueCode(nextPatient)}
+              </button>
+            </>
+          ) : (
+            <p>No waiting {department} patients.</p>
+          )}
+        </section>
+
+        {staffQueue.length ? (
           <div className="nurse-list" aria-label="Nurse queue list">
-            {activeQueue.map((item) => (
+            {staffQueue.map((item) => (
               <NurseQueueCard item={item} runAction={runAction} key={item.id} />
             ))}
           </div>
@@ -561,14 +691,15 @@ function NurseQueueCard({
   item,
   runAction,
 }: {
-  item: QueueItem;
+  item: StaffQueueItem;
   runAction: (action: () => Promise<void>) => void;
 }) {
   return (
     <article className="nurse-card">
       <div>
-        <span>{statusLabel(item.status)}</span>
+        <span>{queueTypeLabelForCode(item.code)} - {statusLabel(item.status)}</span>
         <strong>{formatQueueCode(item)}</strong>
+        <PatientNameLine item={item} />
       </div>
       <div className="nurse-actions" aria-label={`Actions for ${formatQueueCode(item)}`}>
         <button type="button" onClick={() => runAction(() => updateQueueStatus(item.id, "waiting"))}>Waiting</button>
@@ -590,6 +721,7 @@ function QueueTableRow({
   return (
     <div className="queue-row" role="row">
       <strong>{formatQueueCode(item)}</strong>
+      <span>{queueTypeLabelForCode(item.code)}</span>
       <span>{statusLabel(item.status)}</span>
       <div className="row-actions">
         <button type="button" onClick={() => runAction(() => callQueueItem(item.id))}>Call code</button>
@@ -605,10 +737,12 @@ function QueueTableRow({
 function DisplayPage() {
   const queue = useQueueStore();
   const { items } = queue;
-  const nowServing = getNowServing(items);
-  const next = getWaitingQueue(items).filter((item) => item.id !== nowServing?.id).slice(0, 4);
+  const generalNowServing = getNowServing(items, "general");
+  const dentalNowServing = getNowServing(items, "dental");
+  const generalRecent = getRecentDepartmentItems(items, "general", generalNowServing?.id);
+  const dentalRecent = getRecentDepartmentItems(items, "dental", dentalNowServing?.id);
   const hasInitializedRef = React.useRef(false);
-  const lastAnnouncedTicketIdRef = React.useRef<string | null>(null);
+  const lastAnnouncedTicketIdsRef = React.useRef<{ general: string | null; dental: string | null }>({ general: null, dental: null });
 
   const speechSupported =
     typeof window !== "undefined" &&
@@ -619,22 +753,35 @@ function DisplayPage() {
     if (queue.loading) return;
 
     if (!hasInitializedRef.current) {
-      lastAnnouncedTicketIdRef.current = nowServing?.id ?? null;
+      lastAnnouncedTicketIdsRef.current = {
+        general: generalNowServing?.id ?? null,
+        dental: dentalNowServing?.id ?? null,
+      };
       hasInitializedRef.current = true;
       return;
     }
 
-    if (!nowServing || lastAnnouncedTicketIdRef.current === nowServing.id) return;
+    const changedItem =
+      generalNowServing && lastAnnouncedTicketIdsRef.current.general !== generalNowServing.id
+        ? generalNowServing
+        : dentalNowServing && lastAnnouncedTicketIdsRef.current.dental !== dentalNowServing.id
+          ? dentalNowServing
+          : null;
 
-    lastAnnouncedTicketIdRef.current = nowServing.id;
+    lastAnnouncedTicketIdsRef.current = {
+      general: generalNowServing?.id ?? null,
+      dental: dentalNowServing?.id ?? null,
+    };
+
+    if (!changedItem) return;
 
     void (async () => {
-      const result = await announceTicket(nowServing, speechSupported);
+      const result = await announceTicket(changedItem, speechSupported);
       if (result === "blocked") {
         console.warn("[CareFlow announcements] Browser blocked audio until the display has been interacted with.");
       }
     })();
-  }, [nowServing?.id, queue.loading, speechSupported]);
+  }, [generalNowServing?.id, dentalNowServing?.id, queue.loading, speechSupported]);
 
   if (!queue.configured) {
     return <SupabaseSetupScreen mode="display" />;
@@ -656,33 +803,48 @@ function DisplayPage() {
           <h1>Newcastle Medical Centre</h1>
         </header>
 
-        <div className="display-board">
-          <section className="now-serving display-panel" aria-label="Now serving">
-            <span>NOW SERVING</span>
-            {nowServing ? (
-              <>
-                <strong>{formatQueueCode(nowServing)}</strong>
-                <p>{queueProceedInstruction(formatQueueCode(nowServing))}</p>
-              </>
-            ) : (
-              <div className="display-empty">
-                <strong>No active queue yet.</strong>
-                <p>No code is currently being served</p>
-              </div>
-            )}
-          </section>
-
-          <section className="next-strip display-panel" aria-label="Waiting queue">
-            <span>Waiting Queue</span>
-            <div>
-              {next.length ? next.map((item) => <strong key={item.id}>{formatQueueCode(item)}</strong>) : <em>No waiting tickets</em>}
-            </div>
-          </section>
+        <div className="display-board display-board-columns">
+          <DisplayDepartmentColumn title="General" nowServing={generalNowServing} recent={generalRecent} />
+          <DisplayDepartmentColumn title="Dental" nowServing={dentalNowServing} recent={dentalRecent} />
         </div>
 
         <p className="display-instruction">Thank you for your patience</p>
       </section>
     </Shell>
+  );
+}
+
+function DisplayDepartmentColumn({
+  title,
+  nowServing,
+  recent,
+}: {
+  title: string;
+  nowServing?: QueueItem;
+  recent: QueueItem[];
+}) {
+  return (
+    <section className="department-display display-panel" aria-label={`${title} queue`}>
+      <h2>{title}</h2>
+      <div className="department-now-serving">
+        <span>Now Serving</span>
+        {nowServing ? (
+          <>
+            <strong>{formatQueueCode(nowServing)}</strong>
+            <p>{queueProceedInstruction(formatQueueCode(nowServing))}</p>
+          </>
+        ) : (
+          <div className="display-empty">
+            <strong>---</strong>
+            <p>No code is currently being served</p>
+          </div>
+        )}
+      </div>
+      <div className="department-recent">
+        <span>Recent</span>
+        {recent.length ? recent.map((item) => <strong key={item.id}>{formatQueueCode(item)}</strong>) : <em>No recent tickets</em>}
+      </div>
+    </section>
   );
 }
 
@@ -793,23 +955,34 @@ function ErrorScreen({ message, mode = "default" }: { message: string; mode?: "d
 }
 
 function StaffGate({ children }: { children: React.ReactNode }) {
-  const [pin, setPin] = React.useState("");
-  const [unlocked, setUnlocked] = React.useState(() => window.sessionStorage.getItem(staffSessionKey) === "ok");
+  const staff = useStaffSession();
+  const [email, setEmail] = React.useState("");
+  const [password, setPassword] = React.useState("");
   const [error, setError] = React.useState("");
 
-  function submit(event: React.FormEvent) {
+  async function submit(event: React.FormEvent) {
     event.preventDefault();
-    if (pin === staffPin) {
-      // Demo only: session storage is not secure auth. Replace this with real staff authentication before production.
-      window.sessionStorage.setItem(staffSessionKey, "ok");
-      setUnlocked(true);
+    try {
+      await signInStaff(email.trim(), password);
       setError("");
-      return;
+    } catch (error) {
+      setError(error instanceof Error ? error.message : "Could not sign in.");
     }
-    setError("Enter staff PIN 1234.");
   }
 
-  if (unlocked) return <>{children}</>;
+  async function signOut() {
+    try {
+      await signOutStaff();
+      setPassword("");
+      setError("");
+    } catch (error) {
+      setError(error instanceof Error ? error.message : "Could not sign out.");
+    }
+  }
+
+  if (!staff.configured) return <SupabaseSetupScreen />;
+  if (staff.loading) return <LoadingScreen />;
+  if (staff.session && staff.authorized) return <>{children}</>;
 
   return (
     <Shell>
@@ -819,19 +992,37 @@ function StaffGate({ children }: { children: React.ReactNode }) {
           <KeyRound size={30} />
         </div>
         <h1>Staff access</h1>
-        <p>Enter the staff PIN to open this page.</p>
+        <p>Sign in with an authorized staff account to open this page.</p>
+        {staff.session && !staff.authorized && (
+          <div className="instruction-box">
+            <Shield size={22} />
+            <p>This account is signed in but is not authorized for CareFlow staff access.</p>
+          </div>
+        )}
         <form onSubmit={submit} className="pin-form">
-          <label htmlFor="staff-pin">Staff PIN</label>
+          <label htmlFor="staff-email">Email</label>
           <input
-            id="staff-pin"
-            inputMode="numeric"
-            type="password"
-            value={pin}
-            onChange={(event) => setPin(event.target.value)}
-            placeholder="1234"
+            id="staff-email"
+            type="email"
+            value={email}
+            onChange={(event) => setEmail(event.target.value)}
+            placeholder="staff@example.com"
+            autoComplete="username"
           />
-          {error && <span className="pin-error">{error}</span>}
-          <button className="button button-primary button-full" type="submit">Open staff page</button>
+          <label htmlFor="staff-password">Password</label>
+          <input
+            id="staff-password"
+            type="password"
+            value={password}
+            onChange={(event) => setPassword(event.target.value)}
+            placeholder="Password"
+            autoComplete="current-password"
+          />
+          {(error || staff.error) && <span className="pin-error">{error || staff.error}</span>}
+          <button className="button button-primary button-full" type="submit">Sign in</button>
+          {staff.session && (
+            <button className="button button-secondary button-full" type="button" onClick={signOut}>Sign out</button>
+          )}
         </form>
       </section>
     </Shell>
@@ -847,6 +1038,71 @@ function statusLabel(status: QueueStatus) {
     delayed: "Delayed",
   };
   return labels[status];
+}
+
+function PatientNameLine({ item, fallback = "" }: { item: StaffQueueItem; fallback?: string }) {
+  if (!isAppointmentCode(item.code)) return null;
+  return <p>{item.patientName || fallback}</p>;
+}
+
+function searchQueueItems(items: StaffQueueItem[], query: string, department?: QueueDepartment) {
+  const normalizedQuery = normalizeSearchText(query);
+  const normalizedCodeQuery = normalizeQueueSearchCode(query);
+  if (!normalizedQuery) return [];
+
+  return items
+    .filter((item) => item.status !== "completed" && !isClearedQueueItem(item))
+    .filter((item) => !department || queueDepartmentForCode(item.code) === department)
+    .filter((item) => {
+      const code = normalizeSearchText(formatQueueCode(item));
+      const storageCode = normalizeSearchText(item.code);
+      const compactCode = normalizeQueueSearchCode(formatQueueCode(item));
+      const compactStorageCode = normalizeQueueSearchCode(item.code);
+      const patientName = normalizeSearchText(item.patientName || "");
+      return (
+        code.includes(normalizedQuery) ||
+        storageCode.includes(normalizedQuery) ||
+        compactCode.includes(normalizedCodeQuery) ||
+        compactStorageCode.includes(normalizedCodeQuery) ||
+        patientName.includes(normalizedQuery)
+      );
+    })
+    .slice(0, 8);
+}
+
+function queueAheadText(items: QueueItem[], item: QueueItem) {
+  if (item.status !== "waiting") return "";
+  const waiting = getWaitingQueue(items, queueDepartmentForCode(item.code));
+  const ahead = waiting.findIndex((entry) => entry.id === item.id);
+  if (ahead <= 0) return "";
+  const noun = isAppointmentCode(item.code) ? "appointment" : "patient";
+  return ` - ${ahead} ${noun}${ahead === 1 ? "" : "s"} ahead`;
+}
+
+function normalizeSearchText(value: string) {
+  return value.trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+function normalizeQueueSearchCode(value: string) {
+  return value.trim().toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+function withPrivateNames(items: QueueItem[], namesByQueueId: Record<string, string>): StaffQueueItem[] {
+  return items.map((item) => ({ ...item, patientName: namesByQueueId[item.id] }));
+}
+
+function getStaffDisplayQueue(activeQueue: StaffQueueItem[], waitingQueue: StaffQueueItem[]) {
+  const waitingIds = new Set(waitingQueue.map((item) => item.id));
+  return [...waitingQueue, ...activeQueue.filter((item) => !waitingIds.has(item.id))];
+}
+
+function getRecentDepartmentItems(items: QueueItem[], department: QueueDepartment, currentId?: string) {
+  return items
+    .filter((item) => queueDepartmentForCode(item.code) === department)
+    .filter((item) => item.id !== currentId && !isClearedQueueItem(item))
+    .filter((item) => item.status === "called" || item.status === "in_progress" || item.status === "completed")
+    .sort((a, b) => b.createdAt - a.createdAt)
+    .slice(0, 3);
 }
 
 function patientStatusText(status: QueueStatus, isCleared = false) {
@@ -872,9 +1128,10 @@ function App() {
         <Route path="/join" element={<JoinPage />} />
         <Route path="/q/:code" element={<PatientQueuePage />} />
         <Route path="/display" element={<DisplayPage />} />
-        <Route path="/reception" element={<ReceptionPage />} />
+        <Route path="/reception" element={<StaffGate><ReceptionPage /></StaffGate>} />
         <Route path="/reception/print-ticket" element={<TicketPrintPage />} />
         <Route path="/nurse" element={<StaffGate><NursePage /></StaffGate>} />
+        <Route path="/dental" element={<StaffGate><DentalPage /></StaffGate>} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </BrowserRouter>

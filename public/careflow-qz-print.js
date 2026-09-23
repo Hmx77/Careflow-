@@ -207,7 +207,7 @@
   function currentQueueNumber() {
     const element = document.querySelector(".ticket-panel > strong");
     const number = element?.textContent?.trim() || "";
-    return /^[A-Z]?\d{3,}$/.test(number) ? number : "";
+    return /^[A-Z]{1,2}\d{3,}$/.test(number) ? number : "";
   }
 
   function isPrintButton(button) {

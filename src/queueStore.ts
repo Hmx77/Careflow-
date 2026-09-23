@@ -1,5 +1,5 @@
-import { createClient, SupabaseClient } from "@supabase/supabase-js";
-import { useEffect, useSyncExternalStore } from "react";
+import { createClient, Session, SupabaseClient } from "@supabase/supabase-js";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import {
   archiveQueueCode,
   clearedQueueMarker,
@@ -8,27 +8,36 @@ import {
   completedQueueMarkerPrefix,
   formatQueueCode,
   isClearedQueueRecord,
-  nextQueueCodeForSession,
+  isAppointmentCategory,
+  isAppointmentCode,
+  queueDepartmentForCode,
   numericQueueCode,
   parseQueueCode,
-  queueLocationForCategory,
   queueLocationForCode,
+  queueTypeLabelForCode,
   queueProceedInstruction,
   storageQueueCode,
 } from "./queueCodes";
-import type { QueueCategory, QueueCodeStatus } from "./queueCodes";
+import type { QueueCategory, QueueCodeStatus, QueueDepartment } from "./queueCodes";
 
 export type QueueStatus = QueueCodeStatus;
 export type QueuePriority = "normal" | "urgent" | "follow_up";
-export type { QueueCategory } from "./queueCodes";
-export { formatQueueCode, queueProceedInstruction, storageQueueCode } from "./queueCodes";
+export type { QueueCategory, QueueDepartment } from "./queueCodes";
+export {
+  formatQueueCode,
+  isAppointmentCode,
+  queueDepartmentForCode,
+  queueProceedInstruction,
+  queueTypeLabelForCode,
+  storageQueueCode,
+} from "./queueCodes";
 
 export type QueueItem = {
   id: string;
   code: string;
   createdAt: number;
   status: QueueStatus;
-  priority: QueuePriority;
+  priority?: QueuePriority;
   roomLocation: string;
   optionalInternalReference?: string;
   optionalPhoneNumber?: string;
@@ -41,8 +50,13 @@ type QueueRow = {
   status: QueueStatus;
   priority: QueuePriority;
   room_location: string | null;
-  internal_reference: string | null;
-  phone_number: string | null;
+  internal_reference?: string | null;
+  phone_number?: string | null;
+};
+
+type QueuePrivateRow = {
+  queue_id: string;
+  patient_name: string;
 };
 
 type QueueSnapshot = {
@@ -52,13 +66,23 @@ type QueueSnapshot = {
   items: QueueItem[];
 };
 
+type StaffAuthSnapshot = {
+  configured: boolean;
+  loading: boolean;
+  error: string;
+  session: Session | null;
+  authorized: boolean;
+};
+
 const supabaseUrl = cleanEnvValue(import.meta.env.VITE_SUPABASE_URL as string | undefined);
 const supabaseAnonKey = cleanEnvValue(import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined);
 const configError = getConfigError();
 const isConfigured = !configError;
 
 const listeners = new Set<() => void>();
+const staffAuthListeners = new Set<() => void>();
 let didStart = false;
+let didStartStaffAuth = false;
 let supabase: SupabaseClient | null = null;
 let pollingTimer: number | undefined;
 let snapshot: QueueSnapshot = {
@@ -66,6 +90,13 @@ let snapshot: QueueSnapshot = {
   loading: isConfigured,
   error: configError,
   items: [],
+};
+let staffAuthSnapshot: StaffAuthSnapshot = {
+  configured: isConfigured,
+  loading: isConfigured,
+  error: configError,
+  session: null,
+  authorized: false,
 };
 
 export function useQueueStore() {
@@ -76,28 +107,97 @@ export function useQueueStore() {
   return useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
 }
 
+export function useStaffSession() {
+  useEffect(() => {
+    startStaffAuthStore();
+  }, []);
+
+  return useSyncExternalStore(subscribeStaffAuth, getStaffAuthSnapshot, getStaffAuthSnapshot);
+}
+
+export function useQueuePrivateNames(enabled: boolean) {
+  const [state, setState] = useState<{ loading: boolean; error: string; namesByQueueId: Record<string, string> }>({
+    loading: enabled,
+    error: "",
+    namesByQueueId: {},
+  });
+
+  useEffect(() => {
+    if (!enabled) {
+      setState({ loading: false, error: "", namesByQueueId: {} });
+      return;
+    }
+
+    let active = true;
+    let timer: number | undefined;
+    const client = requireSupabase();
+
+    async function loadPrivateNames() {
+      try {
+        const { data, error } = await withTimeout(
+          client.from("queue_private").select("queue_id, patient_name").returns<QueuePrivateRow[]>(),
+          "Loading appointment names timed out.",
+        );
+        if (error) throw error;
+        if (!active) return;
+        setState({
+          loading: false,
+          error: "",
+          namesByQueueId: Object.fromEntries((data || []).map((row) => [row.queue_id, row.patient_name])),
+        });
+      } catch (error) {
+        if (!active) return;
+        logSupabaseError("loadPrivateNames", error);
+        setState((current) => ({ ...current, loading: false, error: normalizeError(error).message }));
+      }
+    }
+
+    void loadPrivateNames();
+    timer = window.setInterval(loadPrivateNames, 4000);
+
+    return () => {
+      active = false;
+      if (timer) window.clearInterval(timer);
+    };
+  }, [enabled]);
+
+  return state;
+}
+
+export async function signInStaff(email: string, password: string) {
+  const { error } = await requireSupabase().auth.signInWithPassword({ email, password });
+  if (error) throw normalizeError(error);
+}
+
+export async function signOutStaff() {
+  const { error } = await requireSupabase().auth.signOut();
+  if (error) throw normalizeError(error);
+  setStaffAuthSnapshot({ ...staffAuthSnapshot, session: null, authorized: false, error: "" });
+}
+
 export async function createQueueItem(input: {
   category: QueueCategory;
   priority?: QueuePriority;
+  patientName?: string;
   optionalInternalReference?: string;
   optionalPhoneNumber?: string;
 }) {
   try {
     const client = requireSupabase();
-    const code = await nextQueueCode(input.category);
-    await archiveCompletedCodeCollision(code);
+    const patientName = input.patientName?.trim() || "";
+    if (isAppointmentCategory(input.category) && !patientName) {
+      throw new Error("Patient name is required for appointment queue numbers.");
+    }
+
     const { data, error } = await withTimeout(
       client
-        .from("queue")
-        .insert({
-          code,
-          status: "waiting",
-          priority: input.priority ?? "normal",
-          room_location: queueLocationForCategory(input.category),
-          internal_reference: input.optionalInternalReference?.trim() || null,
-          phone_number: input.optionalPhoneNumber?.trim() || null,
+        .rpc("careflow_create_queue_item", {
+          input_category: input.category,
+          input_priority: input.priority ?? "normal",
+          input_patient_name: isAppointmentCategory(input.category) ? patientName : null,
+          input_internal_reference: input.optionalInternalReference?.trim() || null,
+          input_phone_number: input.optionalPhoneNumber?.trim() || null,
         })
-        .select("id, code, created_at, status, priority, room_location, internal_reference, phone_number")
         .single<QueueRow>(),
       "Creating queue number timed out.",
     );
@@ -109,42 +209,6 @@ export async function createQueueItem(input: {
     logSupabaseError("createQueueItem", error);
     throw normalizeError(error);
   }
-}
-
-async function archiveCompletedCodeCollision(code: string) {
-  const client = requireSupabase();
-  const { data, error } = await withTimeout(
-    client
-      .from("queue")
-      .select("id, code, created_at, status, priority, room_location, internal_reference, phone_number")
-      .eq("code", code)
-      .eq("status", "completed"),
-    "Preparing queue number timed out.",
-  );
-
-  if (error) throw error;
-
-  const rows = data || [];
-  if (!rows.length) return;
-
-  const results = await Promise.all(
-    rows.map((row) =>
-      withTimeout(
-        client
-          .from("queue")
-          .update({
-            code: archiveQueueCode(row.id, row.code),
-            room_location: row.room_location?.startsWith(clearedQueueMarkerPrefix)
-              ? row.room_location
-              : `${completedQueueMarkerPrefix}${formatQueueCode(row)}`,
-          })
-          .eq("id", row.id),
-        "Preparing queue number timed out.",
-      ),
-    ),
-  );
-  const updateError = results.find((result) => result.error)?.error;
-  if (updateError) throw updateError;
 }
 
 export async function updateQueueStatus(id: string, status: QueueStatus) {
@@ -172,21 +236,29 @@ export async function updateQueueStatus(id: string, status: QueueStatus) {
 export async function callQueueItem(id: string) {
   try {
     const client = requireSupabase();
+    const target = snapshot.items.find((item) => item.id === id);
+    if (!target) return;
+    const department = queueDepartmentForCode(target.code);
+
     const updates = snapshot.items
-      .filter((item) => item.status === "called" || item.id === id)
+      .filter((item) => item.status === "called" && queueDepartmentForCode(item.code) === department && item.id !== id)
       .map((item) =>
         withTimeout(
-          client
-            .from("queue")
-            .update(
-              item.id === id
-                ? { status: "called", room_location: queueLocationForCode(item.code) }
-                : { status: "in_progress" },
-            )
-            .eq("id", item.id),
+          client.from("queue").update({ status: "in_progress" }).eq("id", item.id),
           "Calling queue code timed out.",
         ),
       );
+
+    updates.push(
+      withTimeout(
+        client
+          .from("queue")
+          .update({ status: "called", room_location: queueLocationForCode(target.code) })
+          .eq("id", id)
+          .in("status", ["waiting", "called", "delayed", "in_progress"]),
+        "Calling queue code timed out.",
+      ),
+    );
 
     const results = await Promise.all(updates);
     const error = results.find((result) => result.error)?.error;
@@ -198,8 +270,8 @@ export async function callQueueItem(id: string) {
   }
 }
 
-export async function callNextQueueItem() {
-  const next = getWaitingQueue(snapshot.items)[0];
+export async function callNextQueueItem(department?: QueueDepartment) {
+  const next = getWaitingQueue(snapshot.items, department)[0];
   if (next) await callQueueItem(next.id);
 }
 
@@ -209,7 +281,8 @@ export async function clearAllQueueItems() {
     const { data, error: loadError } = await withTimeout(
       client
         .from("queue")
-        .select("id, code, created_at, status, priority, room_location, internal_reference, phone_number"),
+        .select(publicQueueSelect())
+        .returns<QueueRow[]>(),
       "Loading queue before clearing timed out.",
     );
 
@@ -246,12 +319,19 @@ export function getActiveQueue(items: QueueItem[]) {
   return sortQueue(items.filter((item) => item.status !== "completed" && !isClearedQueueItem(item)));
 }
 
-export function getWaitingQueue(items: QueueItem[]) {
-  return sortQueue(items.filter((item) => item.status === "waiting"));
+export function getDepartmentQueue(items: QueueItem[], department: QueueDepartment) {
+  return getActiveQueue(items).filter((item) => queueDepartmentForCode(item.code) === department);
 }
 
-export function getNowServing(items: QueueItem[]) {
-  const active = getActiveQueue(items);
+export function getWaitingQueue(items: QueueItem[], department?: QueueDepartment) {
+  const waiting = items.filter(
+    (item) => item.status === "waiting" && (!department || queueDepartmentForCode(item.code) === department),
+  );
+  return department ? sortDepartmentWaitingQueue(waiting) : mergeDepartmentWaitingQueues(waiting);
+}
+
+export function getNowServing(items: QueueItem[], department?: QueueDepartment) {
+  const active = department ? getDepartmentQueue(items, department) : getActiveQueue(items);
   const called = active.filter((item) => item.status === "called");
   return called[called.length - 1] || active.find((item) => item.status === "in_progress");
 }
@@ -293,7 +373,8 @@ export function findQueueItemByCode(items: QueueItem[], input: string) {
 }
 
 function startQueueStore() {
-  if (didStart || !isConfigured) return;
+  if (didStart) return;
+  if (!isConfigured) return;
   didStart = true;
   supabase = createClient(supabaseUrl!, supabaseAnonKey!);
   void fetchQueue({ showLoading: true }).catch((error) => {
@@ -332,8 +413,9 @@ async function fetchQueue(options: { showLoading?: boolean } = {}) {
     const { data, error } = await withTimeout(
       client
         .from("queue")
-        .select("id, code, created_at, status, priority, room_location, internal_reference, phone_number")
-        .order("created_at", { ascending: true }),
+        .select(publicQueueSelect())
+        .order("created_at", { ascending: true })
+        .returns<QueueRow[]>(),
       "Loading queue timed out.",
     );
 
@@ -346,29 +428,13 @@ async function fetchQueue(options: { showLoading?: boolean } = {}) {
   }
 }
 
-async function nextQueueCode(category: QueueCategory) {
-  const { data, error } = await withTimeout(
-    requireSupabase()
-      .from("queue")
-      .select("id, code, created_at, status, priority, room_location, internal_reference, phone_number")
-      .order("created_at", { ascending: true }),
-    "Generating queue code timed out.",
-  );
-  if (error) {
-    logSupabaseError("nextQueueCode", error);
-    throw error;
-  }
-
-  return nextQueueCodeForSession(data || [], category);
-}
-
 function fromRow(row: QueueRow): QueueItem {
   return {
     id: row.id,
     code: row.code,
     createdAt: new Date(row.created_at).getTime(),
     status: row.status,
-    priority: row.priority,
+    priority: row.priority ?? "normal",
     roomLocation: row.room_location || "",
     optionalInternalReference: row.internal_reference || undefined,
     optionalPhoneNumber: row.phone_number || undefined,
@@ -388,8 +454,17 @@ function subscribe(listener: () => void) {
   return () => listeners.delete(listener);
 }
 
+function subscribeStaffAuth(listener: () => void) {
+  staffAuthListeners.add(listener);
+  return () => staffAuthListeners.delete(listener);
+}
+
 function getSnapshot() {
   return snapshot;
+}
+
+function getStaffAuthSnapshot() {
+  return staffAuthSnapshot;
 }
 
 function setSnapshot(next: QueueSnapshot) {
@@ -397,8 +472,87 @@ function setSnapshot(next: QueueSnapshot) {
   listeners.forEach((listener) => listener());
 }
 
+function setStaffAuthSnapshot(next: StaffAuthSnapshot) {
+  staffAuthSnapshot = next;
+  staffAuthListeners.forEach((listener) => listener());
+}
+
+function startStaffAuthStore() {
+  if (didStartStaffAuth || !isConfigured) return;
+  didStartStaffAuth = true;
+  const client = requireSupabase();
+
+  void loadStaffSession();
+  client.auth.onAuthStateChange(() => {
+    void loadStaffSession();
+  });
+}
+
+async function loadStaffSession() {
+  try {
+    setStaffAuthSnapshot({ ...staffAuthSnapshot, loading: true, error: "" });
+    const client = requireSupabase();
+    const { data, error } = await client.auth.getSession();
+    if (error) throw error;
+
+    const session = data.session;
+    const authorized = session ? await isAuthorizedStaff() : false;
+    setStaffAuthSnapshot({ configured: true, loading: false, error: "", session, authorized });
+  } catch (error) {
+    logSupabaseError("loadStaffSession", error);
+    setStaffAuthSnapshot({
+      configured: true,
+      loading: false,
+      error: normalizeError(error).message,
+      session: null,
+      authorized: false,
+    });
+  }
+}
+
+async function isAuthorizedStaff() {
+  const { data, error } = await withTimeout(
+    requireSupabase().rpc("careflow_is_staff").returns<boolean>(),
+    "Checking staff access timed out.",
+  );
+  if (error) throw error;
+  return Boolean(data);
+}
+
 function sortQueue(items: QueueItem[]) {
   return [...items].sort((a, b) => a.createdAt - b.createdAt);
+}
+
+function sortDepartmentWaitingQueue(items: QueueItem[]) {
+  return [...items].sort((a, b) => {
+    const appointmentRank = Number(isAppointmentCode(a.code)) - Number(isAppointmentCode(b.code));
+    if (appointmentRank !== 0) return -appointmentRank;
+    return a.createdAt - b.createdAt;
+  });
+}
+
+function mergeDepartmentWaitingQueues(items: QueueItem[]) {
+  const queues: Record<QueueDepartment, QueueItem[]> = {
+    general: sortDepartmentWaitingQueue(items.filter((item) => queueDepartmentForCode(item.code) === "general")),
+    dental: sortDepartmentWaitingQueue(items.filter((item) => queueDepartmentForCode(item.code) === "dental")),
+  };
+  const merged: QueueItem[] = [];
+
+  while (queues.general.length || queues.dental.length) {
+    const general = queues.general[0];
+    const dental = queues.dental[0];
+    if (!dental || (general && general.createdAt <= dental.createdAt)) {
+      merged.push(queues.general.shift()!);
+    } else {
+      merged.push(queues.dental.shift()!);
+    }
+  }
+
+  return merged;
+}
+
+function publicQueueSelect() {
+  return "id, code, created_at, status, room_location";
 }
 
 function shouldArchiveRow(row: QueueRow) {
